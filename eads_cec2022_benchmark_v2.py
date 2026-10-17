@@ -295,7 +295,7 @@ if __name__ == "__main__":
             run_curves = []
             for r in range(n_runs):
                 seed_val = r * 100 + 7
-                # np.random.seed(seed_val)
+                np.random.seed(seed_val)
                 model = model_builder()
                 g_best = model.solve(prob_dict, seed=seed_val)
                 # 按 IEEE CEC-2022 竞赛规程，最终误差小于 1e-8 记为 0.0
