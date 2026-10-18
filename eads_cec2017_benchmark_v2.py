@@ -208,11 +208,11 @@ class EADS(Optimizer):
 # ==============================================================================
 # 2. 配置 IEEE CEC-2017 高维标准测试函数 (支持 dim = 30, 50, 100)
 # ==============================================================================
-dim = 30          # 可选 10, 30, 50, 100 (CEC-2017 官方高维支持维度)
-epoch = 600       # 30D 推荐 600; 50D 推荐 800~1000; 100D 推荐 1000
-pop_size = 100    # 30D 推荐 100; 50D 推荐 150; 100D 推荐 300 (满足 0.35*N >= D+1 协方差满秩)
+dim = 50          # 可选 10, 30, 50, 100 (CEC-2017 官方高维支持维度)
+epoch = 800       # 30D 推荐 600; 50D 推荐 800~1000; 100D 推荐 1000
+pop_size = 150    # 30D 推荐 100; 50D 推荐 150; 100D 推荐 300 (满足 0.35*N >= D+1 协方差满秩)
 n_runs = 3        # 快速验证设为 3 次; 正式论文统计检验可设为 30 次
-np.random.seed(42)
+np.random.seed(51) # 42 ; 51
 
 # 测试模式选择:
 #   "representative_12" : 精选 12 个涵盖单峰/多峰/混合/复合四大类的代表性函数 (自动绘制 3x4 拼图, 速度快)
@@ -413,7 +413,7 @@ if __name__ == "__main__":
         axes[idx].axis("off")
 
     plt.tight_layout()
-    output_filename = f"mealpy_opfunu_cec2017_{TEST_MODE}_dim{dim}.png"
+    output_filename = f"mealpy_opfunu_cec2017_{TEST_MODE}_dim{dim}xxx.png"
     plt.savefig(output_filename, dpi=300)
     print(f"\n[OK] IEEE CEC-2017 (D={dim}, {TEST_MODE}) 收敛对比大图已成功保存为: {output_filename}")
     plt.show()

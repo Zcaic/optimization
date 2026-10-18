@@ -1,21 +1,31 @@
-import numpy as np
-import scipy.stats as stats
-import matplotlib.pyplot as plt
+"""
+================================================================================
+EADS 核心算法模块 (eads.py)
+Eigen-Adaptive Dual-Strategy Differential Evolution (EADS)
+核心算子:
+  1. 对数秩加权收缩正则化协方差特征分解 (Log-Rank Weighted Shrinkage Covariance)
+  2. 异构双策略变异与混合双尺度交叉解耦 (窄域高维耦合开采 + 宽域主探索与 25% 稀疏维度修复) + 中点折返边界修复
+  3. 地形感知的自适应特征子空间正交旋转交叉 (Adaptive Eigen-Subspace Crossover)
+  4. 拉普拉斯平滑单次尝试成功率更新与 Lehmer 成功历史记忆池 (Per-Trial Success Rate & Lehmer Memory)
+================================================================================
+"""
 
-import mealpy
-from mealpy import Optimizer, FloatVar
-from mealpy.swarm_based import PSO
-from mealpy.evolutionary_based import DE, SHADE
+import numpy as np
+from mealpy import Optimizer
+
 
 class EADS(Optimizer):
-    def __init__(self, epoch=300, pop_size=50, H=5, arc_rate=1.0, p_best_rate=0.11, **kwargs):
+    """
+    Eigen-Adaptive Dual-Strategy Differential Evolution (EADS)
+    """
+    def __init__(self, epoch=600, pop_size=100, H=5, arc_rate=1.0, p_best_rate=0.11, **kwargs):
         super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
         self.H = H
         self.arc_rate = arc_rate
         self.p_best_rate = p_best_rate
-        self.sort_flag = True  
+        self.sort_flag = True
 
     def initialize_variables(self):
         self.dim = self.problem.n_dims
@@ -28,40 +38,57 @@ class EADS(Optimizer):
         self.p_eigen = 0.5
         self.B_matrix = np.eye(self.dim)
 
+    def _bound_constraint(self, vec, parent_vec):
+        """
+        SHADE / L-SHADE 标准中点折返边界修复算子 (Midpoint Bounce-Back Repair):
+        防止变异或特征逆投影后的个体硬卡在边界墙上破坏协方差结构
+        """
+        lb = self.problem.lb
+        ub = self.problem.ub
+        vec = np.where(vec < lb, (parent_vec + lb) / 2.0, vec)
+        vec = np.where(vec > ub, (parent_vec + ub) / 2.0, vec)
+        return vec
+
     def _update_eigen_basis(self):
-        n_elites = max(self.dim + 1, int(0.35 * self.pop_size))
+        n_elites = min(self.pop_size, max(self.dim + 1, int(0.35 * self.pop_size)))
         elites = np.array([agent.solution for agent in self.pop[:n_elites]])
-        
-        # ---------------- [改进 2-A: 对数秩加权协方差矩阵] ----------------
+
+        # 算子 1: 对数秩加权经验协方差矩阵
         weights = np.log(n_elites + 0.5) - np.log(np.arange(1, n_elites + 1))
         weights = weights / np.sum(weights)
         mean_elite = np.sum(elites * weights[:, np.newaxis], axis=0)
         diff = elites - mean_elite
         cov = np.dot((diff * weights[:, np.newaxis]).T, diff)
-        # ------------------------------------------------------------------
-        
+
+        # Ledoit-Wolf 保迹收缩正则化 (当种群完全坍缩至浮点极限时保留上一有效特征基)
         trace_m = np.trace(cov) / self.dim if self.dim > 0 else 1.0
-        cov_reg = 0.9999 * cov + 0.0001 * trace_m * np.eye(self.dim)
-        try:
-            _, eigen_vectors = np.linalg.eigh(cov_reg)
-            self.B_matrix = eigen_vectors
-        except np.linalg.LinAlgError:
-            self.B_matrix = np.eye(self.dim)
+        if trace_m > 1e-12:
+            cov_reg = 0.9999 * cov + 0.0001 * trace_m * np.eye(self.dim)
+            try:
+                _, eigen_vectors = np.linalg.eigh(cov_reg)
+                self.B_matrix = eigen_vectors
+            except np.linalg.LinAlgError:
+                self.B_matrix = np.eye(self.dim)
 
     def evolve(self, epoch):
         if epoch % 5 == 0:
             self._update_eigen_basis()
-            
+
         S_CR, S_F, delta_f = [], [], []
         strat1_wins, strat2_wins = 0, 0
+        strat1_trials, strat2_trials = 0, 0
         eigen_wins, standard_wins = 0, 0
-        
-        # ---------------- [改进 2-B: 动态 p-best 精英池线性缩减] ----------------
-        p_rate = 0.20 - (0.20 - 0.04) * (epoch / self.epoch)
-        p_count = max(2, int(self.pop_size * p_rate))
-        # ------------------------------------------------------------------------
-        
+        eigen_trials, standard_trials = 0, 0
+
+        # 策略 1 窄域退火精英池 (0.20 -> 0.04, 专注精细局部开采)
+        p_rate_narrow = 0.20 - (0.20 - 0.04) * (epoch / self.epoch)
+        p_count_narrow = max(2, int(self.pop_size * p_rate_narrow))
+
+        # 策略 2 宽域恒定精英池 (0.25, 保持多峰与周期地形的广域盆地覆盖)
+        p_count_wide = max(3, int(self.pop_size * 0.25))
+
         for i in range(self.pop_size):
+            parent_sol = self.pop[i].solution
             r = self.generator.integers(0, self.H)
             cr = float(np.clip(self.generator.normal(self.M_CR[r], 0.1), 0.0, 1.0))
             while True:
@@ -69,244 +96,102 @@ class EADS(Optimizer):
                 if f_val > 0:
                     f_val = min(1.0, f_val)
                     break
-                    
-            pbest_idx = self.generator.integers(0, p_count)
-            x_pbest = self.pop[pbest_idx].solution
+
             cands_r1 = [idx for idx in range(self.pop_size) if idx != i]
             r1 = self.generator.choice(cands_r1)
             x_r1 = self.pop[r1].solution
-            
+
+            # 从联合池 P U A 中采样历史差异个体 x_r2_arc
+            pool = list(range(self.pop_size))
+            if len(self.archive) > 0:
+                pool += [self.pop_size + idx for idx in range(len(self.archive))]
+            cands_r2 = [idx for idx in pool if idx != i and idx != r1]
+            r2_arc = self.generator.choice(cands_r2)
+            x_r2_arc = self.pop[r2_arc].solution if r2_arc < self.pop_size else self.archive[r2_arc - self.pop_size]
+
             use_strat1 = (self.generator.uniform() < self.p_strat1)
+            is_sparse = False
             if use_strat1:
-                # 策略 1 (开采): current-to-pbest/1 with archive
-                pool = list(range(self.pop_size))
-                if len(self.archive) > 0:
-                    pool += [self.pop_size + idx for idx in range(len(self.archive))]
-                cands_r2 = [idx for idx in pool if idx != i and idx != r1]
-                r2 = self.generator.choice(cands_r2)
-                x_r2 = self.pop[r2].solution if r2 < self.pop_size else self.archive[r2 - self.pop_size]
-                v = self.pop[i].solution + f_val * (x_pbest - self.pop[i].solution) + f_val * (x_r1 - x_r2)
+                strat1_trials += 1
+                # 策略 1 (高维耦合精细开采): 窄域退火精英池 + 历史记忆自适应高交叉率 cr_eff = cr
+                pbest_idx = self.generator.integers(0, p_count_narrow)
+                x_pbest = self.pop[pbest_idx].solution
+                v = parent_sol + f_val * (x_pbest - parent_sol) + f_val * (x_r1 - x_r2_arc)
+                cr_eff = cr
             else:
-                # 策略 2 (勘探): 精英基向量 + 柯西重尾扰动
-                r2 = self.generator.choice(cands_r1)
-                x_r2 = self.pop[r2].solution
-                cauchy_step = self.generator.standard_cauchy(self.dim) * 0.05
-                v = x_pbest + f_val * (x_r1 - x_r2) + cauchy_step * (x_r1 - self.pop[i].solution)
-                
-            v = self.correct_solution(v)
-            
-            # 自适应特征子空间交叉
+                # 策略 2 (宽域归档勘探 + 25% 概率稀疏维度解耦修复):
+                # 75% 保持全交叉率 cr 以保障 F1/F2/F4/F7 高维全空间推进速度，
+                # 25% 采用低维稀疏交叉 cr_eff ~ N(0.15, 0.08) 精准解锁 F8(Levy) 单维周期陷阱，且不参与策略竞争统计以免稀释策略 1 权重
+                pbest_wide_idx = self.generator.integers(0, p_count_wide)
+                x_pbest_wide = self.pop[pbest_wide_idx].solution
+                v = parent_sol + f_val * (x_pbest_wide - parent_sol) + f_val * (x_r1 - x_r2_arc)
+                if self.generator.uniform() < 0.25:
+                    cr_eff = float(np.clip(self.generator.normal(0.15, 0.08), 0.02, 0.35))
+                    is_sparse = True
+                else:
+                    strat2_trials += 1
+                    cr_eff = cr
+
+            v = self._bound_constraint(v, parent_sol)
+
+            # 算子 3: 地形感知的自适应特征子空间正交交叉 (使用有效交叉率 cr_eff)
             use_eigen = (self.generator.uniform() < self.p_eigen)
             if use_eigen:
+                eigen_trials += 1
                 v_prime = np.dot(self.B_matrix.T, v)
-                x_prime = np.dot(self.B_matrix.T, self.pop[i].solution)
-                mask = self.generator.uniform(size=self.dim) < cr
+                x_prime = np.dot(self.B_matrix.T, parent_sol)
+                mask = self.generator.uniform(size=self.dim) < cr_eff
                 mask[self.generator.integers(0, self.dim)] = True
                 u_prime = np.where(mask, v_prime, x_prime)
                 u = np.dot(self.B_matrix, u_prime)
             else:
-                mask = self.generator.uniform(size=self.dim) < cr
+                standard_trials += 1
+                mask = self.generator.uniform(size=self.dim) < cr_eff
                 mask[self.generator.integers(0, self.dim)] = True
-                u = np.where(mask, v, self.pop[i].solution)
-                
-            u = self.correct_solution(u)
+                u = np.where(mask, v, parent_sol)
+
+            u = self._bound_constraint(u, parent_sol)
             new_agent = self.generate_agent(u)
-            
+
             if self.compare_target(new_agent.target, self.pop[i].target, self.problem.minmax):
                 diff = abs(self.pop[i].target.fitness - new_agent.target.fitness)
                 delta_f.append(diff)
                 S_CR.append(cr)
                 S_F.append(f_val)
-                if use_strat1: strat1_wins += 1
-                else: strat2_wins += 1
-                if use_eigen: eigen_wins += 1
-                else: standard_wins += 1
-                
+                if use_strat1:
+                    strat1_wins += 1
+                elif not is_sparse:
+                    strat2_wins += 1
+                if use_eigen:
+                    eigen_wins += 1
+                else:
+                    standard_wins += 1
+
                 if self.max_archive_size > 0:
                     if len(self.archive) < self.max_archive_size:
-                        self.archive.append(self.pop[i].solution.copy())
+                        self.archive.append(parent_sol.copy())
                     else:
                         rep_idx = self.generator.integers(0, self.max_archive_size)
-                        self.archive[rep_idx] = self.pop[i].solution.copy()
+                        self.archive[rep_idx] = parent_sol.copy()
                 self.pop[i] = new_agent
-                
-        # 概率自适应滑动更新
+
+        # 算子 4: 消除马太效应的单次尝试成功率 (Laplace Smoothed Per-Trial Success Rate) 更新
         if (strat1_wins + strat2_wins) > 0:
-            self.p_strat1 = 0.85 * self.p_strat1 + 0.15 * (strat1_wins / (strat1_wins + strat2_wins))
-            self.p_strat1 = np.clip(self.p_strat1, 0.1, 0.9)
-            
+            sr1 = (strat1_wins + 0.5) / (strat1_trials + 1.0)
+            sr2 = (strat2_wins + 0.5) / (strat2_trials + 1.0)
+            self.p_strat1 = 0.85 * self.p_strat1 + 0.15 * (sr1 / (sr1 + sr2))
+            self.p_strat1 = np.clip(self.p_strat1, 0.25, 0.90)
+
         if (eigen_wins + standard_wins) > 0:
-            self.p_eigen = 0.85 * self.p_eigen + 0.15 * (eigen_wins / (eigen_wins + standard_wins))
+            sr_eig = (eigen_wins + 0.5) / (eigen_trials + 1.0)
+            sr_std = (standard_wins + 0.5) / (standard_trials + 1.0)
+            self.p_eigen = 0.85 * self.p_eigen + 0.15 * (sr_eig / (sr_eig + sr_std))
             self.p_eigen = np.clip(self.p_eigen, 0.05, 0.95)
-            
-        # Lehmer 均值更新记忆池
+
         if len(S_CR) > 0:
             sum_df = np.sum(delta_f)
             if sum_df > 1e-12:
                 w = np.array(delta_f) / sum_df
                 self.M_CR[self.k_mem] = np.sum(w * np.array(S_CR))
-                self.M_F[self.k_mem] = np.sum(w * (np.array(S_F)**2)) / np.sum(w * np.array(S_F))
+                self.M_F[self.k_mem] = np.sum(w * (np.array(S_F) ** 2)) / np.sum(w * np.array(S_F))
                 self.k_mem = (self.k_mem + 1) % self.H
-
-# ==============================================================================
-# test
-# ==============================================================================
-dim = 10
-epoch = 500
-pop_size = 50  # D=10, 50, D=30, 100, D=60, 200
-n_runs = 3
-np.random.seed(42)
-
-o1 = np.random.uniform(-30, 30, dim)
-o2 = np.random.uniform(-5, 5, dim)
-o3 = np.random.uniform(-2.5, 2.5, dim)
-o4 = np.random.uniform(-10, 10, dim)
-o5 = np.random.uniform(-2.5, 2.5, dim)
-o6 = np.random.uniform(-10, 10, dim)
-o7 = np.random.uniform(-150, 150, dim)
-o8 = np.random.uniform(-2, 2, dim)
-
-H1 = np.random.randn(dim, dim); Q1, _ = np.linalg.qr(H1)
-H2 = np.random.randn(dim, dim); Q2, _ = np.linalg.qr(H2)
-H3 = np.random.randn(dim, dim); Q3, _ = np.linalg.qr(H3)
-
-def f1_shifted_sphere(x):
-    z = x - o1
-    return float(np.sum(z**2))
-
-def f2_shifted_rosenbrock(x):
-    z = x - o2 + 1.0
-    return float(np.sum(100.0 * (z[1:] - z[:-1]**2.0)**2.0 + (1 - z[:-1])**2.0))
-
-def f3_shifted_rastrigin(x):
-    z = x - o3
-    return float(10.0 * dim + np.sum(z**2.0 - 10.0 * np.cos(2.0 * np.pi * z)))
-
-def f4_shifted_ackley(x):
-    z = x - o4
-    d = len(z)
-    return float(-20.0 * np.exp(-0.2 * np.sqrt(np.sum(z**2) / d)) - np.exp(np.sum(np.cos(2.0 * np.pi * z)) / d) + 20.0 + np.e)
-
-def f5_shifted_rot_rastrigin(x):
-    z = np.dot(x - o5, Q1)
-    return float(10.0 * dim + np.sum(z**2.0 - 10.0 * np.cos(2.0 * np.pi * z)))
-
-def f6_shifted_rot_ackley(x):
-    z = np.dot(x - o6, Q2)
-    d = len(z)
-    return float(-20.0 * np.exp(-0.2 * np.sqrt(np.sum(z**2) / d)) - np.exp(np.sum(np.cos(2.0 * np.pi * z)) / d) + 20.0 + np.e)
-
-def f7_shifted_griewank(x):
-    z = x - o7
-    sum_part = np.sum(z**2) / 4000.0
-    prod_part = np.prod(np.cos(z / np.sqrt(np.arange(1, dim + 1))))
-    return float(sum_part - prod_part + 1.0)
-
-def f8_shifted_rot_hybrid(x):
-    z = np.dot(x - o8, Q3) + 1.0
-    rosen = 100.0 * (z[1:] - z[:-1]**2.0)**2.0 + (1 - z[:-1])**2.0
-    return float(np.sum(rosen**2 / 4000.0 - np.cos(rosen) + 1.0))
-
-BENCHMARKS = [
-    {"name": "F1: Shifted Sphere", "func": f1_shifted_sphere, "lb": -100.0, "ub": 100.0},
-    {"name": "F2: Shifted Rosenbrock", "func": f2_shifted_rosenbrock, "lb": -30.0, "ub": 30.0},
-    {"name": "F3: Shifted Rastrigin", "func": f3_shifted_rastrigin, "lb": -5.12, "ub": 5.12},
-    {"name": "F4: Shifted Ackley", "func": f4_shifted_ackley, "lb": -32.768, "ub": 32.768},
-    {"name": "F5: Shifted Rot Rastrigin", "func": f5_shifted_rot_rastrigin, "lb": -5.12, "ub": 5.12},
-    {"name": "F6: Shifted Rot Ackley", "func": f6_shifted_rot_ackley, "lb": -32.768, "ub": 32.768},
-    {"name": "F7: Shifted Griewank", "func": f7_shifted_griewank, "lb": -600.0, "ub": 600.0},
-    {"name": "F8: Shifted Rot Hybrid", "func": f8_shifted_rot_hybrid, "lb": -10.0, "ub": 10.0},
-]
-
-
-if __name__ == "__main__":
-    algorithms = {
-        "PSO (Mealpy)": lambda: PSO.OriginalPSO(epoch=epoch, pop_size=pop_size),
-        "DE (Mealpy)": lambda: DE.OriginalDE(epoch=epoch, pop_size=pop_size, wf=0.5, cr=0.9),
-        "SHADE (Mealpy)": lambda: SHADE.OriginalSHADE(epoch=epoch, pop_size=pop_size, miu_f=0.5, miu_cr=0.5),
-        "L-SHADE (Mealpy)": lambda: SHADE.L_SHADE(epoch=epoch, pop_size=pop_size, miu_f=0.5, miu_cr=0.5),
-        "EADS (Proposed)": lambda: EADS(epoch=epoch, pop_size=pop_size, H=5, arc_rate=1.0)
-    }
-
-    results_summary = {}
-    all_curves = {}
-
-    print("\n" + "="*110)
-    print(f"  8 test functions, D = {dim}, run times = {n_runs}, Epoch = {epoch})")
-    print("="*110)
-
-    for bm in BENCHMARKS:
-        fname = bm["name"]
-        print(f"\n>>> running: {fname}")
-        results_summary[fname] = {}
-        all_curves[fname] = {}
-        
-        prob_dict = {
-            "obj_func": bm["func"],
-            "bounds": FloatVar(lb=[bm["lb"]]*dim, ub=[bm["ub"]]*dim, name="delta"),
-            "minmax": "min",
-            "log_to": None,
-        }
-
-        for alg_name, model_builder in algorithms.items():
-            run_fits = []
-            run_curves = []
-            for r in range(n_runs):
-                model = model_builder()
-                g_best = model.solve(prob_dict, seed=r*100+7)
-                run_fits.append(g_best.target.fitness)
-                run_curves.append(model.history.list_global_best_fit)
-                
-            run_fits = np.array(run_fits)
-            mean_curve = np.mean(np.array(run_curves), axis=0)
-            results_summary[fname][alg_name] = {"mean": np.mean(run_fits), "std": np.std(run_fits)}
-            all_curves[fname][alg_name] = mean_curve
-            print(f"  [{alg_name:18s}] 适应度均值: {np.mean(run_fits):.3e} | 标准差: {np.std(run_fits):.3e}")
-
-    print("\n" + "="*115)
-    print(f"{'function':<28} | {'PSO':<12} | {'DE':<12} | {'SHADE':<12} | {'L-SHADE':<12} | {'EADS':<12}")
-    print("="*115)
-    for bm in BENCHMARKS:
-        fn = bm['name']
-        p_str = f"{results_summary[fn]['PSO (Mealpy)']['mean']:.2e}"
-        d_str = f"{results_summary[fn]['DE (Mealpy)']['mean']:.2e}"
-        s_str = f"{results_summary[fn]['SHADE (Mealpy)']['mean']:.2e}"
-        ls_str = f"{results_summary[fn]['L-SHADE (Mealpy)']['mean']:.2e}"
-        e_str = f"{results_summary[fn]['EADS (Proposed)']['mean']:.2e}"
-        print(f"{fn:<28} | {p_str:<12} | {d_str:<12} | {s_str:<12} | {ls_str:<12} | {e_str:<12}")
-    print("="*115)
-
-    fig, axes = plt.subplots(2, 4, figsize=(22, 10))
-    axes = axes.flatten()
-
-    colors = {
-        "PSO (Mealpy)": "#7f7f7f", "DE (Mealpy)": "#1f77b4", 
-        "SHADE (Mealpy)": "#ff7f0e", "L-SHADE (Mealpy)": "#9467bd",
-        "EADS (Proposed)": "#d62728"
-    }
-    linestyles = {
-        "PSO (Mealpy)": ":", "DE (Mealpy)": "--", 
-        "SHADE (Mealpy)": "-.", "L-SHADE (Mealpy)": "--",
-        "EADS (Proposed)": "-"
-    }
-    x_epochs = np.arange(1, epoch + 1)
-
-    for idx, bm in enumerate(BENCHMARKS):
-        ax = axes[idx]
-        fname = bm["name"]
-        for alg_name in algorithms.keys():
-            curve = all_curves[fname][alg_name]
-            plot_curve = np.maximum(curve, 1e-16)
-            ax.plot(x_epochs, plot_curve, label=alg_name, color=colors[alg_name],
-                    linestyle=linestyles[alg_name], linewidth=2.2 if "EADS" in alg_name else 1.4)
-        ax.set_yscale('log')
-        ax.set_title(fname, fontsize=11, fontweight='bold')
-        ax.set_xlabel('Epoch (Iterations)', fontsize=9)
-        ax.set_ylabel('Best Fitness (Log Scale)', fontsize=9)
-        ax.grid(True, linestyle='--', alpha=0.5)
-        ax.legend(fontsize=8, loc='upper right')
-
-    plt.tight_layout()
-    output_filename = f"mealpy_shifted_rotated_8benchmarks_dim{dim}_imp2.png"
-    # plt.savefig(output_filename, dpi=300)
-    plt.show()
