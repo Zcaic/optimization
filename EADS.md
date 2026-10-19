@@ -1,521 +1,332 @@
-### 一、 核心数学符号体系 (Nomenclature)
+# IEEE 期刊标准算法伪代码：EADS (`v1_champion` 定稿版)
+
+本文档提供与正文中 **算子 1 \~ 算子 4 数学公式（式 (1) – 式 (21)）** 及 `eads.py`（`s2_mode="v1_champion"`）**100% 严格对齐**的两种格式伪代码：
+
+1. **Markdown 数学排版伪代码**（适合直接在 Markdown 预览器、Notion、Typora 或 Word 初稿中阅读与排版）；
+
+2. **IEEE Transactions (`IEEEtran`) 标准 `algorithm2e` LaTeX 源码**（适合直接复制到 Overleaf / LaTeX 双栏模板中编译）。
+
+## 一、Markdown 格式 IEEE 标准算法伪代码
+
+> **Algorithm 1: Eigen-Adaptive Dual-Strategy Differential Evolution (EADS)**
+>
+> **Input:**
+>
+> * 种群规模 $N$ (`pop_size`)，问题维度 $D$ (`dim`)，最大进化代数 $G_{\max}$ (`epoch`)；
+>
+> * 历史记忆池容量 $H = 5$，外部存档比例 $r_{\text{arc}} = 1.0$（最大容量 $\vert{}\mathcal{A}\vert{}_{\max} = \lfloor r_{\text{arc}} N \rfloor$）；
+>
+> * 特征基更新周期 $G_e = 5$，收缩正则化系数 $\gamma = 10^{-4}$；
+>
+> * 精英池退火边界 $p_{\max} = 0.20, p_{\min} = 0.04$，柯西重尾尺度 $\sigma_c = 0.05$，EMA 学习率 $\alpha = 0.15$。
+>
+> **Output:**
+>
+> * 全局最优解 $\mathbf{x}_{\text{best}}$ 及其目标适应度值 $f(\mathbf{x}_{\text{best}})$。
+>
+> **/* 阶段 0：种群与自适应记忆状态初始化 \*/*\*
+>
+> 1. 在搜索空间 $[\mathbf{lb}, \mathbf{ub}] \subset \mathbb{R}^D$ 内均匀随机初始化种群 $\mathcal{P}^{(0)} = \{\mathbf{x}_1^{(0)}, \dots, \mathbf{x}_N^{(0)}\}$，计算全部个体的目标函数值 $f(\mathbf{x}_i^{(0)})$ 并按升序排列；
+>
+> 2. 初始化成功历史记忆池：$M_{CR, h} \leftarrow 0.5, \; M_{F, h} \leftarrow 0.5 \;\; (\forall h \in \{1, \dots, H\})$，循环写入指针 $k_{\text{mem}} \leftarrow 1$；
+>
+> 3. 初始化淘汰父代外部存档 $\mathcal{A} \leftarrow \emptyset$，算子选择概率 $p_{\text{strat1}}^{(0)} \leftarrow 0.5, \; p_{\text{eigen}}^{(0)} \leftarrow 0.5$，正交特征基矩阵 $\mathbf{B} \leftarrow \mathbf{I}_D$；
+>
+> **/* 主进化循环 \*/*\*
+> 4. **for** 进化代数 $g = 0$ **to** $G_{\max} - 1$ **do**
+> 5.  将当前种群 $\mathcal{P}^{(g)}$ 按适应度升序排列：$f(\mathbf{x}_{(1)}^{(g)}) \le f(\mathbf{x}_{(2)}^{(g)}) \le \dots \le f(\mathbf{x}_{(N)}^{(g)})$；
+>
+>  **/\* 算子 1：对数秩加权收缩正则化协方差特征分解 — 对应正文式 (1)–(5) \*/**
+> 6.  **if** $g \bmod G_e == 0$ **then**
+> 7.   确定满秩截断精英规模：$K \leftarrow \min\big(N, \max(D + 1, \lfloor 0.35 N \rfloor)\big)$，提取前 $K$ 个精英个体 $\{\mathbf{x}_{(1)}^{(g)}, \dots, \mathbf{x}_{(K)}^{(g)}\}$；
+> 8.   计算对数秩权重：$w_k \leftarrow \frac{\ln(K + 0.5) - \ln(k)}{\sum_{j=1}^{K} (\ln(K + 0.5) - \ln(j))}, \quad k = 1, \dots, K$；
+> 9.   计算精英加权质心 $\boldsymbol{\mu}_{\text{elite}} \leftarrow \sum_{k=1}^{K} w_k \mathbf{x}_{(k)}^{(g)}$ 与加权经验协方差矩阵 $\mathbf{C}_w \leftarrow \sum_{k=1}^{K} w_k (\mathbf{x}_{(k)}^{(g)} - \boldsymbol{\mu}_{\text{elite}})(\mathbf{x}_{(k)}^{(g)} - \boldsymbol{\mu}_{\text{elite}})^T$；
+> 10.   执行 Ledoit-Wolf 保迹收缩正则化：$\mathbf{C}_{\text{reg}} \leftarrow (1 - \gamma)\mathbf{C}_w + \gamma \frac{\text{Tr}(\mathbf{C}_w)}{D} \mathbf{I}_D$；
+> 11.   对实对称正定矩阵 $\mathbf{C}_{\text{reg}}$ 进行谱分解 $\mathbf{C}_{\text{reg}} = \mathbf{B} \mathbf{\Lambda} \mathbf{B}^T$，更新正交特征基矩阵 $\mathbf{B} \in \mathbb{R}^{D \times D}$；
+> 12.  **end if**
+>
+>  **/\* 初始化当代表现统计容器与动态退火精英池 — 对应正文式 (6)–(8) \*/**
+> 13.  清空成功参数记录集：$S_{CR} \leftarrow \emptyset, \; S_F \leftarrow \emptyset, \; \Delta \mathcal{F} \leftarrow \emptyset$；
+> 14.  重置尝试与成功计数器：$N_1, N_2, n_1, n_2 \leftarrow 0$；$N_{\text{eig}}, N_{\text{std}}, n_{\text{eig}}, n_{\text{std}} \leftarrow 0$；
+> 15.  计算线性退火精英比例：$p^{(g)} \leftarrow p_{\max} - (p_{\max} - p_{\min}) \cdot \frac{g}{G_{\max}}$，精英池容量 $K_p^{(g)} \leftarrow \max\big(2, \lfloor N \cdot p^{(g)} \rfloor\big)$；
+>
+>  **/\* 遍历种群个体生成变异与交叉试验向量 \*/**
+> 16.  **for** $i = 1$ **to** $N$ **do**
+> 17.   随机采样记忆槽索引 $r_i \in \{1, \dots, H\}$；
+> 18.   生成交叉率 $CR_i \leftarrow \text{clip}\big(\mathcal{N}(M_{CR, r_i}, 0.1^2), 0, 1\big)$；
+> 19.   重复采样缩放因子 $F_i \sim \mathcal{C}(M_{F, r_i}, 0.1)$ 直至 $F_i > 0$，并截断 $F_i \leftarrow \min(1.0, F_i)$；
+> 20.   从前 $K_p^{(g)}$ 个精英中均匀采样 $\mathbf{x}_{p\text{best}}^{(g)}$，从 $\mathcal{P}^{(g)} \setminus \{\mathbf{x}_i^{(g)}\}$ 中均匀采样 $\mathbf{x}_{r_1}^{(g)}$；
+>
+>   **/\* 算子 2：异构双策略变异与中点折返修复 — 对应正文式 (9)–(11) \*/**
+> 21.   **if** $\text{rand}(0, 1) < p_{\text{strat1}}^{(g)}$ **then**  // **策略** $\mathcal{S}_1$**：定向精细开采 (`DE/current-to-pbest/1/archive`)**
+> 22.    $N_1 \leftarrow N_1 + 1$；从联合池 $(\mathcal{P}^{(g)} \cup \mathcal{A}) \setminus \{\mathbf{x}_i^{(g)}, \mathbf{x}_{r_1}^{(g)}\}$ 中均匀采样 $\tilde{\mathbf{x}}_{r_2}^{(g)}$；
+> 23.    $\mathbf{v}_i^{(g)} \leftarrow \mathbf{x}_i^{(g)} + F_i \cdot (\mathbf{x}_{p\text{best}}^{(g)} - \mathbf{x}_i^{(g)}) + F_i \cdot (\mathbf{x}_{r_1}^{(g)} - \tilde{\mathbf{x}}_{r_2}^{(g)})$；
+> 24.   **else**  // **策略** $\mathcal{S}_2$**：精英基跃迁与自缩放柯西重尾扰动勘探 (`v1_champion`)**
+> 25.    $N_2 \leftarrow N_2 + 1$；从 $\mathcal{P}^{(g)} \setminus \{\mathbf{x}_i^{(g)}\}$ 中采样 $\mathbf{x}_{r_2}^{(g)}$；生成 $D$ 维独立柯西向量 $\boldsymbol{\delta}_i \sim \mathcal{C}(0, \sigma_c)^D$；
+> 26.    $\mathbf{v}_i^{(g)} \leftarrow \mathbf{x}_{p\text{best}}^{(g)} + F_i \cdot (\mathbf{x}_{r_1}^{(g)} - \mathbf{x}_{r_2}^{(g)}) + \boldsymbol{\delta}_i \odot (\mathbf{x}_{r_1}^{(g)} - \mathbf{x}_i^{(g)})$；
+> 27.   **end if**
+> 28.   对变异向量 $\mathbf{v}_i^{(g)}$ 执行 SHADE 中点折返边界修复（式 (11)）；
+>
+>   **/\* 算子 3：地形感知的自适应特征子空间正交旋转交叉 — 对应正文式 (12)–(15) \*/**
+> 29.   随机选取强制交叉维度 $j_{\text{rand}} \in \{1, \dots, D\}$；
+> 30.   **if** $\text{rand}(0, 1) < p_{\text{eigen}}^{(g)}$ **then**  // **特征子空间正交旋转交叉 (`Eigen-Subspace Crossover`)**
+> 31.    $N_{\text{eig}} \leftarrow N_{\text{eig}} + 1$；将父代与变异向量正交投影至特征空间：$\hat{\mathbf{x}}_i^{(g)} \leftarrow \mathbf{B}^T \mathbf{x}_i^{(g)}, \quad \hat{\mathbf{v}}_i^{(g)} \leftarrow \mathbf{B}^T \mathbf{v}_i^{(g)}$；
+> 32.    对 $\forall j \in \{1, \dots, D\}$：若 $\text{rand}_j(0,1) < CR_i$ 或 $j = j_{\text{rand}}$，令 $\hat{u}_{i,j}^{(g)} \leftarrow \hat{v}_{i,j}^{(g)}$，否则 $\hat{u}_{i,j}^{(g)} \leftarrow \hat{x}_{i,j}^{(g)}$；
+> 33.    正交逆投影回原笛卡尔空间：$\mathbf{u}_i^{(g)} \leftarrow \mathbf{B} \hat{\mathbf{u}}_i^{(g)}$；
+> 34.   **else**  // **标准笛卡尔坐标二项式交叉 (`Standard Binomial Crossover`)**
+> 35.    $N_{\text{std}} \leftarrow N_{\text{std}} + 1$；
+> 36.    对 $\forall j \in \{1, \dots, D\}$：若 $\text{rand}_j(0,1) < CR_i$ 或 $j = j_{\text{rand}}$，令 $u_{i,j}^{(g)} \leftarrow v_{i,j}^{(g)}$，否则 $u_{i,j}^{(g)} \leftarrow x_{i,j}^{(g)}$；
+> 37.   **end if**
+> 38.   对试验向量 $\mathbf{u}_i^{(g)}$ 执行 SHADE 中点折返边界修复（式 (11)），并评测适应度 $f(\mathbf{u}_i^{(g)})$；
+>
+>   **/\* 贪婪选择、外部存档维护与成功信息记录 \*/**
+> 39.   **if** $f(\mathbf{u}_i^{(g)}) < f(\mathbf{x}_i^{(g)})$ **then**
+> 40.    记录适应度改进量与成功参数：$\Delta \mathcal{F} \leftarrow \Delta \mathcal{F} \cup \{f(\mathbf{x}_i^{(g)}) - f(\mathbf{u}_i^{(g)})\}, \; S_{CR} \leftarrow S_{CR} \cup \{CR_i\}, \; S_F \leftarrow S_F \cup \{F_i\}$；
+> 41.    累加获胜算子计数：对应变异策略成功数 $n_1 \text{ (或 } n_2) \leftarrow +1$，对应交叉模式成功数 $n_{\text{eig}} \text{ (或 } n_{\text{std}}) \leftarrow +1$；
+> 42.    将被淘汰父代 $\mathbf{x}_i^{(g)}$ 存入外部存档 $\mathcal{A}$（若 $\vert{}\mathcal{A}\vert{} == \vert{}\mathcal{A}\vert{}_{\max}$，则随机替换 $\mathcal{A}$ 中一个历史个体）；
+> 43.    更新个体：$\mathbf{x}_i^{(g+1)} \leftarrow \mathbf{u}_i^{(g)}$；
+> 44.   **else**
+> 45.    保留父代：$\mathbf{x}_i^{(g+1)} \leftarrow \mathbf{x}_i^{(g)}$；
+> 46.   **end if**
+> 47.  **end for**
+>
+>  **/\* 算子 4：拉普拉斯平滑单次尝试成功率与 Lehmer 历史记忆更新 — 对应正文式 (16)–(21) \*/**
+> 48.  **if** $n_1 + n_2 > 0$ **then**
+> 49.   计算贝叶斯平滑单次尝试成功率：$\hat{s}_1 \leftarrow \frac{n_1 + 0.5}{N_1 + 1.0}, \quad \hat{s}_2 \leftarrow \frac{n_2 + 0.5}{N_2 + 1.0}$；
+> 50.   更新变异策略概率：$p_{\text{strat1}}^{(g+1)} \leftarrow \text{clip}\Big((1 - \alpha) p_{\text{strat1}}^{(g)} + \alpha \frac{\hat{s}_1}{\hat{s}_1 + \hat{s}_2}, \; 0.25, \; 0.90\Big)$；
+> 51.  **end if**
+> 52.  **if** $n_{\text{eig}} + n_{\text{std}} > 0$ **then**
+> 53.   计算贝叶斯平滑单次尝试成功率：$\hat{s}_{\text{eig}} \leftarrow \frac{n_{\text{eig}} + 0.5}{N_{\text{eig}} + 1.0}, \quad \hat{s}_{\text{std}} \leftarrow \frac{n_{\text{std}} + 0.5}{N_{\text{std}} + 1.0}$；
+> 54.   更新特征交叉概率：$p_{\text{eigen}}^{(g+1)} \leftarrow \text{clip}\Big((1 - \alpha) p_{\text{eigen}}^{(g)} + \alpha \frac{\hat{s}_{\text{eig}}}{\hat{s}_{\text{eig}} + \hat{s}_{\text{std}}}, \; 0.05, \; 0.95\Big)$；
+> 55.  **end if**
+> 56.  **if** $S_{CR} \neq \emptyset$ **and** $\sum_{k=1}^{\vert{}S_{CR}\vert{}} \Delta f_k > 10^{-12}$ **then**
+> 57.   计算归一化改进权重 $\omega_k \leftarrow \frac{\Delta f_k}{\sum_{j=1}^{\vert{}S_{CR}\vert{}} \Delta f_j}$；
+> 58.   更新历史记忆槽：$M_{CR, k_{\text{mem}}} \leftarrow \sum_{k=1}^{\vert{}S_{CR}\vert{}} \omega_k CR_k$，$M_{F, k_{\text{mem}}} \leftarrow \frac{\sum_{k=1}^{\vert{}S_F\vert{}} \omega_k F_k^2}{\sum_{k=1}^{\vert{}S_F\vert{}} \omega_k F_k}$；
+> 59.   推进循环指针：$k_{\text{mem}} \leftarrow (k_{\text{mem}} \bmod H) + 1$；
+> 60.  **end if**
+> 61. **end for**
+> 62. **return** 全局最优解 $\mathbf{x}_{\text{best}} = \mathbf{x}_{(1)}^{(G_{\max})}$ 及最优适应度 $f(\mathbf{x}_{\text{best}})$。
 
-| 符号 | 数学定义与物理意义 |
-| --- | --- |
-| $D \in \mathbb{N}^+$ | 优化问题的决策空间维度 (Dimension of Decision Space) |
-| $N \in \mathbb{N}^+$ | 种群规模 (Population Size)，满足满秩采样约束 $N \ge \lceil (D+1)/0.35 \rceil$ |
-| $t, T_{\max}$ | 当前演化代数与最大演化代数 ($t \in \{1, 2, \dots, T_{\max}\}$) |
-| $\mathbf{x}_i^{(t)}, \mathbf{v}_i^{(t)}, \mathbf{u}_i^{(t)}$ | 第 $t$ 代第 $i$ 个目标向量 (Target)、变异向量 (Mutant) 与试验向量 (Trial Vector) |
-| $K \in \mathbb{N}^+$ | 参与协方差估计的优势个体截断规模，$K = \max(D+1, \lfloor 0.35 N \rfloor)$ |
-| $w_k \in (0, 1)$ | 第 $k$ 优个体的对数秩权重系数 (Log-Rank Weight Coefficient) |
-| $\mathbf{C}_w^{(t)}, \mathbf{C}_{\text{reg}}^{(t)}$ | 对数秩加权协方差矩阵与 Ledoit-Wolf 保迹收缩正则化协方差矩阵 |
-| $\mathbf{B}^{(t)} \in \mathbb{R}^{D \times D}$ | 正交特征向量矩阵 (Orthogonal Eigenbasis Matrix)，满足 $(\mathbf{B}^{(t)})^T \mathbf{B}^{(t)} = \mathbf{I}_D$ |
-| $\mathcal{A}^{(t)}$ | 淘汰父代个体的外部归档集合 (External Archive)，最大容量 $\vert{}\mathcal{A}^{(t)}\vert{} \le N$ |
-| $p^{(t)} \in [0.04, 0.20]$ | 时变退火精英池比例 (Time-Annealing Elite Pool Ratio) |
-| $p_{\text{strat1}}^{(t)}, p_{\text{eigen}}^{(t)}$ | 变异策略 1 触发概率與特征子空间交叉触发概率 |
-| $\mathbf{M}_{CR}, \mathbf{M}_F \in \mathbb{R}^H$ | 交叉概率与缩放因子的历史成功记忆池 (记忆容量 $H = 5$) |
 
-### 二、 四大核心算子数学公式与理论机理
 
-#### 算子 1：对数秩加权收缩正则化特征子空间提取 (Log-Rank Weighted Shrinkage-Regularized Eigenspace Extraction)
+## 二、论文数学符号与代码变量对照表
 
-**1. 数学公式**
-每隔 $G_e = 5$ 代，将当前种群 $\mathcal{P}^{(t)}$ 按适应度升序排列为 $f(\mathbf{x}_{(1:N)}^{(t)}) \le f(\mathbf{x}_{(2:N)}^{(t)}) \le \dots \le f(\mathbf{x}_{(N:N)}^{(t)})$，截取前 $K = \max(D+1, \lfloor 0.35 N \rfloor)$ 个优势个体构建样本矩阵。
-首先，计算每个优势个体的对数秩衰减权重 $w_k$：
+| **伪代码数学符号** | **物理含义** | **eads.py 对应变量 / 方法** | **默认参数 / 取值范围** | 
+| $N, D, G_{\max}$ | 种群规模、问题维度、最大进化代数 | `self.pop_size`, `self.dim`, `self.epoch` | 如 50D 下 $N=150, G_{\max}=800$ | 
+| $H, k_{\text{mem}}$ | 成功历史记忆池大小、循环更新指针 | `self.H`, `self.k_mem` | $H = 5$, $k_{\text{mem}} \in \{0, \dots, 4\}$ | 
+| $M_{CR}, M_F$ | 交叉率与缩放因子历史记忆槽数组 | `self.M_CR`, `self.M_F` | 初始全为 $0.5$ | 
+| $\mathcal{A}, r_{\text{arc}}$ | 外部淘汰父代存档及容量系数 | `self.archive`, `self.arc_rate` | $r_{\text{arc}} = 1.0, \vert{}\mathcal{A}\vert{}_{\max} = N$ | 
+| $G_e$ | 协方差特征基更新周期 | `epoch % 5 == 0` | $G_e = 5$ | 
+| $K$ | 协方差估计精英截断数 | `n_elites` | $\min(N, \max(D+1, \lfloor 0.35N \rfloor))$ | 
+| $w_k$ | 对数秩正定权重 | `weights` | $\propto \ln(K+0.5) - \ln(k)$ | 
+| $\mathbf{C}_w, \mathbf{C}_{\text{reg}}$ | 经验协方差矩阵与保迹收缩正则化矩阵 | `cov`, `cov_reg` | $\gamma = 10^{-4}$ (`0.9999` 与 `0.0001`) | 
+| $\mathbf{B}$ | 特征向量正交旋转基矩阵 | `self.B_matrix` | $\mathbf{B} \in \mathbb{R}^{D \times D}, \mathbf{B}^T\mathbf{B} = \mathbf{I}_D$ | 
+| $p^{(g)}, K_p^{(g)}$ | 动态线性退火精英率与精英个体数 | `p_rate`, `p_count` | $0.20 \to 0.04$, $K_p^{(g)} \ge 2$ | 
+| $\boldsymbol{\delta}_i, \sigma_c$ | 策略 2 的 $D$ 维柯西重尾扰动向量与尺度 | `cauchy_step` | $\mathcal{C}(0, 0.05)^D$ | 
+| $p_{\text{strat1}}^{(g)}, p_{\text{eigen}}^{(g)}$ | 策略 1 变异概率、特征子空间交叉概率 | `self.p_strat1`, `self.p_eigen` | 初始 $0.5$，边界 $[0.25, 0.90]$ 与 $[0.05, 0.95]$ | 
+| $N_1, N_2, n_1, n_2$ | 策略 1/2 当代尝试总次数与获胜次数 | `strat1_trials`, `strat2_trials`, `strat1_wins`, `strat2_wins` | 每代清零重新统计 | 
+| $\hat{s}_1, \hat{s}_2, \hat{s}_{\text{eig}}, \hat{s}_{\text{std}}$ | 拉普拉斯平滑单次尝试成功率 | `sr1`, `sr2`, `sr_eig`, `sr_std` | $\frac{n + 0.5}{N_{\text{trial}} + 1.0}$ | 
 
 
-$$w_k = \frac{\ln(K + 0.5) - \ln(k)}{\sum_{j=1}^{K} \left(\ln(K + 0.5) - \ln(j)\right)}, \quad k = 1, 2, \dots, K$$
+以下按照你最终定稿的 **`v1_champion` 冠军版**（CEC-2022 10D: `2.04`、20D: `1.50`；CEC-2017 30D: `1.75`、50D: `1.50` 全部排名第一），从 **SCI 顶刊（如 *IEEE TEVC*、*Swarm and Evolutionary Computation*）论文撰写视角**，系统阐述 **EADS (*Eigen-Adaptive Dual-Strategy Differential Evolution*)** 的核心设计动机、四大算子的严密数学公式、理论性质证明以及时间复杂度分析。
 
+---
 
-接着，计算加权分布质心 $\boldsymbol{\mu}_w^{(t)}$ 与对数秩加权经验协方差矩阵 $\mathbf{C}_w^{(t)}$：
+### 一、 EADS 算法的核心设计动机与三大学术创新点（Introduction & Motivation）
 
+在撰写论文引言（Introduction）与方法论概述（Methodology Overview）时，可以将 EADS 的核心特点归纳为针对传统自适应差分进化（如 SHADE、L-SHADE、CoBiDE）三大固有缺陷的靶向突破：
 
-$$\boldsymbol{\mu}_w^{(t)} = \sum_{k=1}^{K} w_k \mathbf{x}_{(k:N)}^{(t)}$$
+1. **突破旋转耦合地形下的“笛卡尔正交网格盲区”（Rotational Invariance & Valley Alignment）**
+传统 DE、SHADE 和 L-SHADE 依赖标准笛卡尔二项式交叉，隐含假设优化变量沿原始坐标轴 $\mathbf{e}_1, \dots, \mathbf{e}_D$ 相互独立。在经过正交矩阵 $\mathbf{M} \in \text{O}(D)$ 旋转的病态狭长山谷（如条件数 $\kappa = 10^6$ 的 Bent Cigar、非线性耦合的 Rosenbrock）上，笛卡尔交叉以 $1 - CR^k$ 的高概率切断共轭下降方向。EADS 通过提取精英群体的**对数秩加权收缩正则化协方差特征基 $\mathbf{B}^{(g)}$**，将交叉操作动态映射至与海森矩阵（Hessian Matrix）主轴对齐的特征子空间。
+2. **突破“局部精细开采”与“跨盆地重尾跳出”的单一算子矛盾（Heterogeneous Dual-Strategy Synergy）**
+单一的 `DE/current-to-pbest/1` 策略擅长沿单峰斜坡下潜，但在复杂混合函数（Hybrid Functions）与多漏斗复合函数（Composition Functions）中极易陷入局部极值。EADS 构建了**时变退火精英池引导的异构双策略变异算子**：策略 1 利用外部历史归档库（Archive $\mathcal{A}$）实现稳健的局部山谷开采；策略 2 以精英个体 $\mathbf{x}_{p\text{best}}$ 为跳板，耦合**自缩放各向异性柯西重尾扰动（Self-Scaling Cauchy Perturbation）**，兼顾中前期跨盆地长程跃迁与后期 $10^{-16}$ 浮点极限收敛。
+3. **破除算子自适应中的“马太效应死锁”（Jeffreys-Prior Smoothed Per-Trial Success Rate）**
+传统多算子自适应算法按“成功次数占比” $\frac{n_1}{n_1+n_2}$ 更新选择概率，导致早期偶然获胜的算子因获得更多抽样次数而产生正反馈锁死（Rich-Get-Richer Bias），丧失中后期模式切换能力。EADS 提出基于 **Jeffreys 先验 $\text{Beta}(0.5, 0.5)$ 的拉普拉斯平滑单次尝试成功率更新准则**，实现无偏的在线算子调度。
 
-$$\mathbf{C}_w^{(t)} = \sum_{k=1}^{K} w_k \left(\mathbf{x}_{(k:N)}^{(t)} - \boldsymbol{\mu}_w^{(t)}\right)\left(\mathbf{x}_{(k:N)}^{(t)} - \boldsymbol{\mu}_w^{(t)}\right)^T$$
+---
 
+### 二、 EADS 四大核心算子的数学公式与理论推导（Section 3: The Proposed EADS Algorithm）
 
-为防止演化后期种群坍缩进低维流形导致 $\mathbf{C}_w^{(t)}$ 病态或奇异，引入 Ledoit-Wolf 型保迹线性收缩正则化：
+设优化问题定义在有界搜索空间 $\Omega = \prod_{j=1}^{D} [lb_j, ub_j] \subset \mathbb{R}^D$ 上，种群规模为 $N$，最大迭代代数为 $G_{\max}$。第 $g$ 代种群按适应度升序排列为 $f(\mathbf{x}_{1:N}^{(g)}) \le f(\mathbf{x}_{2:N}^{(g)}) \le \dots \le f(\mathbf{x}_{N:N}^{(g)})$。
 
+#### 算子 1：对数秩加权保迹收缩协方差特征分解算子（Log-Rank Weighted Shrinkage-Regularized Eigenspace Extraction）
 
-$$\mathbf{C}_{\text{reg}}^{(t)} = (1 - \lambda)\mathbf{C}_w^{(t)} + \lambda \left(\frac{\text{Tr}(\mathbf{C}_w^{(t)})}{D}\right) \mathbf{I}_D, \quad \lambda = 10^{-4}$$
+为将特征分解的 $\mathcal{O}(D^3)$ 代数开销摊薄至每代 $\frac{1}{G_e}\mathcal{O}(D^3)$，EADS 每隔 $G_e = 5$ 代（即满足 $g \bmod 5 = 0$ 时）更新一次正交特征基矩阵 $\mathbf{B}^{(g)} \in \mathbb{R}^{D \times D}$：
 
+1. **满秩自适应精英截断规模**：
+选取前 $K$ 个最优精英个体构建局部地形估计池：
 
-最后，对实对称正定矩阵 $\mathbf{C}_{\text{reg}}^{(t)}$ 执行谱分解 (Spectral Decomposition)：
+$$K = \min\left(N, \; \max\left(D + 1, \; \lfloor 0.35 N \rfloor\right)\right)$$
 
 
-$$\mathbf{C}_{\text{reg}}^{(t)} = \mathbf{B}^{(t)} \mathbf{\Lambda}^{(t)} (\mathbf{B}^{(t)})^T$$
 
+**数学原理**：强制要求 $K \ge D + 1$（当 $N > D$ 时），从线性代数层面保证样本中心化矩阵的秩满足 $\text{rank}(\mathbf{X}_{\text{elite}} - \boldsymbol{\mu}) = D$，避免高维空间（如 $D=50, 100$）中样本数小于维度导致的协方差矩阵奇异退化。
+2. **信息几何对数秩非线性加权（Log-Rank Utility Weighting）**：
+不同排名的精英个体携带不同的地形曲率信息。为抑制次优个体中的离群噪声，赋予第 $k$ 名精英个体对数递减权重：
 
-其中 $\mathbf{\Lambda}^{(t)} = \text{diag}(\sigma_1^2, \dots, \sigma_D^2)$ 为特征值对角阵，$\mathbf{B}^{(t)} = [\mathbf{b}_1, \dots, \mathbf{b}_D] \in \mathbb{R}^{D \times D}$ 为标准正交特征基矩阵。
+$$\tilde{w}_k = \ln(K + 0.5) - \ln(k), \qquad w_k = \frac{\tilde{w}_k}{\sum_{j=1}^{K} \tilde{w}_j}, \qquad k = 1, 2, \dots, K$$
 
-**2. 数学原理与几何意义**
 
-* **二阶曲率逆向感知**：在二阶泰勒展开下，水平集 $\{ \mathbf{x} \mid f(\mathbf{x}) \le c \}$ 内高适应度个体的空间分布协方差近似正比于目标函数海森矩阵的逆 $\mathbf{H}^{-1}$（即 $\mathbf{C}_w^{(t)} \propto \mathbf{H}^{-1}$）。因此，$\mathbf{C}_{\text{reg}}^{(t)}$ 的最大特征值对应的特征向量 $\mathbf{b}_D$ 严格对齐于狭长弯曲峡谷（如 Rosenbrock 函数）的切向主脊线。
-* **对数秩滤波去噪**：相比传统等权协方差（赋予第 1 名与第 $K$ 名相同的权重 $1/K$），对数秩加权 $w_k \propto \ln(K+0.5)-\ln(k)$ 赋予顶尖精英指数级更高的方向话语权，滤除了排在 $35\%$ 边缘处次优个体的梯度法向噪声，同时保持 $K \ge D+1$ 的满秩自由度。
-* **保迹谱下界保证**：收缩项 $\frac{\text{Tr}(\mathbf{C}_w^{(t)})}{D}\mathbf{I}_D$ 与原矩阵具有完全相同的迹（$\text{Tr}(\mathbf{C}_{\text{reg}}^{(t)}) = \text{Tr}(\mathbf{C}_w^{(t)})$），在不改变总体方差尺度的前提下，将最小特征值严格下界抬升至 $\lambda \bar{\sigma}^2 > 0$，从理论上杜绝了正交特征分解 `eigh` 的数值崩溃。
 
-#### 算子 2：时变精英池引导的异构双策略变异算子 (Time-Annealing Elite-Guided Heterogeneous Dual-Strategy Mutation)
+由此计算加权精英质心 $\boldsymbol{\mu}_{\text{elite}}^{(g)}$ 与加权经验协方差矩阵 $\mathbf{C}_w^{(g)}$：
 
-**1. 数学公式**
-在第 $t$ 代，首先根据线性退火调度确定精英池截断比例 $p^{(t)}$ 与精英池规模 $K_p^{(t)}$：
+$$\boldsymbol{\mu}_{\text{elite}}^{(g)} = \sum_{k=1}^{K} w_k \mathbf{x}_{k:N}^{(g)}, \qquad \mathbf{C}_w^{(g)} = \sum_{k=1}^{K} w_k \left(\mathbf{x}_{k:N}^{(g)} - \boldsymbol{\mu}_{\text{elite}}^{(g)}\right)\left(\mathbf{x}_{k:N}^{(g)} - \boldsymbol{\mu}_{\text{elite}}^{(g)}\right)^T$$
 
 
-$$p^{(t)} = p_{\max} - (p_{\max} - p_{\min}) \cdot \frac{t}{T_{\max}}, \quad K_p^{(t)} = \max\left(2, \lfloor N \cdot p^{(t)} \rfloor\right)$$
+3. **保迹 Ledoit-Wolf 收缩正则化与谱分解（Trace-Preserving Shrinkage & Spectral Decomposition）**：
+当进化后期种群沿狭长山谷高度聚集时，$\mathbf{C}_w^{(g)}$ 的最小特征值趋近于机器精度零，易引发数值病态。引入保迹收缩正则化算子：
 
+$$\mathbf{C}_{\text{reg}}^{(g)} = (1 - \gamma)\mathbf{C}_w^{(g)} + \gamma \frac{\text{Tr}\left(\mathbf{C}_w^{(g)}\right)}{D}\mathbf{I}_D, \qquad \gamma = 10^{-4}$$
 
-其中 $p_{\max} = 0.20$，$p_{\min} = 0.04$。随后从前 $K_p^{(t)}$ 个顶尖个体中等概率抽取 $\mathbf{x}_{p\text{best}}^{(t)}$。
-对于每个目标个体 $\mathbf{x}_i^{(t)}$，生成均匀随机数 $u_{\text{mut}} \sim \mathcal{U}(0, 1)$，并根据动态选择概率 $p_{\text{strat1}}^{(t)}$ 执行异构双通道变异：
 
 
-$$\mathbf{v}_i^{(t)} = \begin{cases} \mathbf{x}_i^{(t)} + F_i \left(\mathbf{x}_{p\text{best}}^{(t)} - \mathbf{x}_i^{(t)}\right) + F_i \left(\mathbf{x}_{r_1}^{(t)} - \tilde{\mathbf{x}}_{r_2}^{(t)}\right), & \text{if } u_{\text{mut}} < p_{\text{strat1}}^{(t)} \quad (\text{Strategy 1: Exploitation}) \\ \mathbf{x}_{p\text{best}}^{(t)} + F_i \left(\mathbf{x}_{r_1}^{(t)} - \mathbf{x}_{r_2}^{(t)}\right) + \boldsymbol{\delta}_i \odot \left(\mathbf{x}_{r_1}^{(t)} - \mathbf{x}_i^{(t)}\right), & \text{otherwise} \quad (\text{Strategy 2: Exploration}) \end{cases}$$
+随后对对称正定矩阵 $\mathbf{C}_{\text{reg}}^{(g)} \succ \mathbf{0}$ 执行实对称特征分解：
 
+$$\mathbf{C}_{\text{reg}}^{(g)} = \mathbf{B}^{(g)} \mathbf{\Lambda}^{(g)} \left(\mathbf{B}^{(g)}\right)^T$$
 
-其中：
 
-* $r_1, r_2 \in \{1, \dots, N\} \setminus \{i\}$ 为互斥随机个体索引，$\tilde{\mathbf{x}}_{r_2}^{(t)} \in \mathcal{P}^{(t)} \cup \mathcal{A}^{(t)}$ 为从当前种群与历史淘汰归档并集中随机抽取的个体；
-* $\odot$ 表示 Hadamard 逐元素乘积，$\boldsymbol{\delta}_i = [\delta_{i,1}, \dots, \delta_{i,D}]^T$ 为重尾柯西随机向量，其各分量独立服从尺度参数 $\gamma = 0.05$ 的柯西分布：
 
-$$\delta_{i,j} \sim \mathcal{C}(0, \gamma), \quad f_{\mathcal{C}}(\delta; 0, \gamma) = \frac{1}{\pi \gamma \left[1 + (\delta/\gamma)^2\right]}$$
+其中 $\mathbf{B}^{(g)} = [\mathbf{b}_1^{(g)}, \dots, \mathbf{b}_D^{(g)}]$ 为满足 $\left(\mathbf{B}^{(g)}\right)^T \mathbf{B}^{(g)} = \mathbf{I}_D$ 的正交特征向量矩阵。
+**二阶泰勒近似对齐原理**：在局部极小值点 $\mathbf{x}^*$ 邻域内，目标函数二阶泰勒展开为 $f(\mathbf{x}) \approx f(\mathbf{x}^*) + \frac{1}{2}(\mathbf{x}-\mathbf{x}^*)^T \mathbf{H} (\mathbf{x}-\mathbf{x}^*)$。在截断选择压力下，精英分布的协方差矩阵渐近收敛于海森矩阵的逆 $\mathbf{C}_{\text{reg}}^{(g)} \propto \mathbf{H}^{-1}$，故特征向量矩阵 $\mathbf{B}^{(g)}$ 的列向量精确对齐黑盒旋转矩阵的主轴方向。
 
+---
 
+#### 算子 2：时变退火精英引导的异构双策略变异与中点折返边界修复算子（Time-Annealing Heterogeneous Dual-Strategy Mutation & Midpoint Bounce-Back Repair）
 
-**2. 数学原理与几何意义**
+1. **个体参数采样与时变退火精英池（Time-Annealing Elite Pool）**：
+对每个目标个体 $i \in \{1, \dots, N\}$，从成功历史记忆池中随机抽取索引 $r \in \{0, \dots, H-1\}$，按正态分布与柯西分布生成交叉率 $CR_i$ 与缩放因子 $F_i$：
 
-* **选择压力时变退火 ($p^{(t)}: 0.20 \to 0.04$)**：在演化早期（$t \ll T_{\max}$），较大的 $p^{(t)} \approx 0.20$ 将引导中心分散至前 $20\%$ 的不同局部极值盆地，有效阻止种群在多峰旋转地形（如 Griewank 与 Rastrigin）中过早坍缩至同一局部凹坑；在演化末期（$t \to T_{\max}$），$p^{(t)} \to 0.04$ 将引导焦点收束至最顶尖的 $2 \sim 8$ 个精英解，实现指数级局部精修。
-* **多尺度柯西重尾跳变 (Self-Scaled Cauchy Basin Hopping)**：策略 2 直接以精英个体 $\mathbf{x}_{p\text{best}}^{(t)}$ 为跃迁基点，并附加重尾项 $\boldsymbol{\delta}_i \odot (\mathbf{x}_{r_1}^{(t)} - \mathbf{x}_i^{(t)})$。由于柯西分布二阶矩发散（方差无穷大，尾部以幂律 $O(\delta^{-2})$ 衰减），它能以显著高于高斯分布的概率产生跨数量级的大步长脉冲，协助停滞个体跨越深谷势垒；同时，乘子 $(\mathbf{x}_{r_1}^{(t)} - \mathbf{x}_i^{(t)})$ 赋予了扰动天然的**空间自缩放特性**——当后期种群收敛、$\Vert{}\mathbf{x}_{r_1}^{(t)} - \mathbf{x}_i^{(t)}\Vert{}_2 \to 0$ 时，重尾扰动半径随之自动归零，不会破坏末期精细收敛。
+$$CR_i = \text{clip}\left(\mathcal{N}(M_{CR, r}^{(g)}, \, 0.1^2), \; 0, \; 1\right), \qquad F_i = \min\left(1.0, \; \mathcal{C}(M_{F, r}^{(g)}, \, 0.1)\right) \quad (\text{若 } F_i \le 0 \text{ 则重采样})$$
 
-#### 算子 3：地形感知的自适应特征子空间双模式交叉 (Landscape-Aware Adaptive Eigen-Subspace Crossover)
 
-**1. 数学公式**
-生成随机数 $u_{\text{eig}} \sim \mathcal{U}(0, 1)$ 及强制交叉维度索引 $j_{\text{rand}} \sim \mathcal{U}\{1, \dots, D\}$：
 
-* **模式 A（正交特征子空间旋转交叉，当 $u_{\text{eig}} < p_{\text{eigen}}^{(t)}$ 时触发）**：
-1. **正交投影解耦**：将父代向量与变异向量映射至特征坐标系：
+精英池比例 $p^{(g)}$ 随迭代代数线性退火收缩：
 
-$$\hat{\mathbf{x}}_i^{(t)} = (\mathbf{B}^{(t)})^T \mathbf{x}_i^{(t)}, \quad \hat{\mathbf{v}}_i^{(t)} = (\mathbf{B}^{(t)})^T \mathbf{v}_i^{(t)}$$
+$$p^{(g)} = p_{\max} - (p_{\max} - p_{\min}) \cdot \frac{g}{G_{\max}}, \qquad K_p^{(g)} = \max\left(2, \; \lfloor N \cdot p^{(g)} \rfloor\right)$$
 
 
-2. **主轴独立二项式重组**：在特征子空间内执行维度级交叉：
 
-$$\hat{u}_{i, j}^{(t)} = \begin{cases} \hat{v}_{i, j}^{(t)}, & \text{if } \text{rand}_{i, j}(0, 1) < CR_i \text{ or } j = j_{\text{rand}} \\ \hat{x}_{i, j}^{(t)}, & \text{otherwise} \end{cases}, \quad j = 1, \dots, D$$
+其中 $p_{\max} = 0.20$，$p_{\min} = 0.04$。前期大精英池（$20\%$）防止种群过早坍缩至单一局部极值，后期小精英池（$4\%$）集中算力进行高精度局部收敛。
+2. **异构双策略变异（Heterogeneous Dual-Strategy Mutation）**：
+生成均匀随机数 $u_{\text{strat}} \sim \mathcal{U}(0, 1)$，按自适应概率 $p_{\text{strat1}}^{(g)}$ 动态分配变异策略：
+* **策略 1：带外部归档的定向开采策略（Directional Exploitation, 当 $u_{\text{strat}} < p_{\text{strat1}}^{(g)}$ 时）**
 
+$$\mathbf{v}_i^{(g)} = \mathbf{x}_i^{(g)} + F_i \left(\mathbf{x}_{p\text{best}}^{(g)} - \mathbf{x}_i^{(g)}\right) + F_i \left(\mathbf{x}_{r_1}^{(g)} - \tilde{\mathbf{x}}_{r_2}^{(g)}\right)$$
 
-3. **逆正交重构**：将重组向量逆映射回原决策空间：
 
-$$\mathbf{u}_i^{(t)} = \mathbf{B}^{(t)} \hat{\mathbf{u}}_i^{(t)}$$
 
+其中 $\mathbf{x}_{p\text{best}}^{(g)}$ 随机取自前 $K_p^{(g)}$ 个精英个体，$\mathbf{x}_{r_1}^{(g)} \in \mathcal{P}^{(g)} \setminus \{\mathbf{x}_i^{(g)}\}$，而 $\tilde{\mathbf{x}}_{r_2}^{(g)} \in (\mathcal{P}^{(g)} \cup \mathcal{A}^{(g)}) \setminus \{\mathbf{x}_i^{(g)}, \mathbf{x}_{r_1}^{(g)}\}$ 从当前种群 $\mathcal{P}^{(g)}$ 与历史淘汰父代归档库 $\mathcal{A}^{(g)}$（最大容量 $\vert{}\mathcal{A}\vert{}_{\max} = N$）的并集中采样，为长狭山谷提供稳定的历史步长方向记忆。
+* **策略 2：精英锚定与自缩放柯西重尾勘探策略（Elite-Anchored Self-Scaling Cauchy Exploration, 当 $u_{\text{strat}} \ge p_{\text{strat1}}^{(g)}$ 时）**
 
+$$\mathbf{v}_i^{(g)} = \mathbf{x}_{p\text{best}}^{(g)} + F_i \left(\mathbf{x}_{r_1}^{(g)} - \mathbf{x}_{r_2}^{(g)}\right) + \boldsymbol{\delta}_i \odot \left(\mathbf{x}_{r_1}^{(g)} - \mathbf{x}_i^{(g)}\right), \qquad \boldsymbol{\delta}_i \sim \mathcal{C}(0, \, \sigma_c)^D, \quad \sigma_c = 0.05$$
 
 
-* **模式 B（原笛卡尔坐标系标准交叉，当 $u_{\text{eig}} \ge p_{\text{eigen}}^{(t)}$ 时触发）**：
 
-$$u_{i, j}^{(t)} = \begin{cases} v_{i, j}^{(t)}, & \text{if } \text{rand}_{i, j}(0, 1) < CR_i \text{ or } j = j_{\text{rand}} \\ x_{i, j}^{(t)}, & \text{otherwise} \end{cases}, \quad j = 1, \dots, D$$
+其中 $\mathbf{x}_{r_1}^{(g)}, \mathbf{x}_{r_2}^{(g)} \in \mathcal{P}^{(g)} \setminus \{\mathbf{x}_i^{(g)}\}$，$\odot$ 表示 Hadamard 逐元素乘积，$\boldsymbol{\delta}_i$ 为 $D$ 维独立标准柯西随机向量乘上尺度因子 $\sigma_c = 0.05$。
+**数学原理（重尾逃逸与渐近自缩放性）**：
+1. *重尾跨盆地跳出*：柯西分布的概率密度函数 $p(\delta) = \frac{1}{\pi\sigma_c[1+(\delta/\sigma_c)^2]} \sim \mathcal{O}(\delta^{-2})$ 具有多项式重尾特性，偶发的大幅值脉冲能协助个体跨越混合函数（F10/F13/F18）与多峰函数（F4）的高势垒；
+2. *渐近零误差自缩放（Self-Scaling Decay）*：扰动项 $\boldsymbol{\delta}_i$ 并非直接加在坐标上，而是与个体差异向量 $(\mathbf{x}_{r_1}^{(g)} - \mathbf{x}_i^{(g)})$ 作 Hadamard 乘积。在勘探初期 $\Vert{}\mathbf{x}_{r_1}^{(g)} - \mathbf{x}_i^{(g)}\Vert{}$ 较大，重尾步长被自然放大；而在收敛末期当种群逼近全局最优解（$\Vert{}\mathbf{x}_{r_1}^{(g)} - \mathbf{x}_i^{(g)}\Vert{} \to 10^{-16}$）时，扰动幅值随种群半径同步自动衰减至零，从根本上避免了固定步长柯西变异在后期破坏高精度收敛的缺陷。
 
 
 
-**2. 数学原理与几何意义**
 
-* **旋转不可分地形的坐标解耦**：设对角选维算子为 $\mathbf{M}_i = \text{diag}(m_{i,1}, \dots, m_{i,D})$（其中 $m_{i,j} \in \{0, 1\}$）。模式 A 的等价线性代数表达式为：
+3. **SHADE 中点折返边界修复（Midpoint Bounce-Back Boundary Repair）**：
+对变异向量 $\mathbf{v}_i^{(g)}$（以及交叉后的试验向量 $\mathbf{u}_i^{(g)}$）逐维执行以父代 $\mathbf{x}_i^{(g)}$ 为锚点的中点折返修复：
 
-$$\mathbf{u}_i^{(t)} = \mathbf{B}^{(t)} \mathbf{M}_i (\mathbf{B}^{(t)})^T \mathbf{v}_i^{(t)} + \mathbf{B}^{(t)} (\mathbf{I}_D - \mathbf{M}_i) (\mathbf{B}^{(t)})^T \mathbf{x}_i^{(t)}$$
+$$v_{i,j}^{(g)} \leftarrow \begin{cases} \dfrac{x_{i,j}^{(g)} + lb_j}{2}, & \text{若 } v_{i,j}^{(g)} < lb_j \\ \dfrac{x_{i,j}^{(g)} + ub_j}{2}, & \text{若 } v_{i,j}^{(g)} > ub_j \\ v_{i,j}^{(g)}, & \text{其它} \end{cases}$$
 
 
 
-当目标函数经过未知正交旋转矩阵 $\mathbf{Q}$ 变换（如 $f(\mathbf{Q}(\mathbf{x}-\mathbf{o}))$）时，传统笛卡尔交叉（$\mathbf{B} = \mathbf{I}_D$）只能沿着与坐标轴平行的超立方体棱边移动，在斜向峡谷中产生严重的“之字形碰壁（Zig-Zagging）”。而当 $\mathbf{B}^{(t)} \approx \mathbf{Q}^T$ 时，模式 A 的交叉超平面严格平行于旋转后的等高线主轴，彻底消除了旋转变量间的交叉耦合冲突。
-* **可分地形的无损兼容**：在严格坐标轴对齐的可分多峰函数（如 F3 Shifted Rastrigin）中，$x_1, \dots, x_D$ 彼此正交独立，任何非单位阵旋转反而会引入人为耦合干扰。双模式切换机制允许算法通过自适应概率 $p_{\text{eigen}}^{(t)}$ 自动识别两类地形，实现“可分地形走原坐标、旋转地形走特征空间”的自适应分流。
+**数学原理**：若采用硬截断（Hard Clamping）将越界分量直接置为 $lb_j$ 或 $ub_j$，大量个体会堆积在超立方体边界 $\partial\Omega$ 上，导致边界法向方差归零并严重污染算子 1 的协方差矩阵 $\mathbf{C}_w^{(g)}$。中点折返确保修复后的个体严格位于可行域内部 $\text{int}(\Omega)$，保持协方差矩阵的非奇异性。
 
-#### 算子 4：双通道闭环概率追踪与 Lehmer 成功历史记忆更新 (Dual-Channel Closed-Loop Adaptation & Success-History Memory)
+---
 
-**1. 数学公式**
-定义世代成功改进量 $\Delta f_i^{(t)} = \max\left(0, f(\mathbf{x}_i^{(t)}) - f(\mathbf{u}_i^{(t)})\right)$。统计第 $t$ 代两类变异策略的成功次数 $n_{\text{strat1}}^{(t)}, n_{\text{strat2}}^{(t)}$ 以及两类交叉模式的成功次数 $n_{\text{eig}}^{(t)}, n_{\text{std}}^{(t)}$。
+#### 算子 3：地形感知的自适应特征子空间正交旋转交叉算子（Landscape-Aware Adaptive Eigen-Subspace Crossover）
 
-* **双通道一阶无限脉冲响应 (IIR) 指数平滑概率更新**：
-当 $n_{\text{strat1}}^{(t)} + n_{\text{strat2}}^{(t)} > 0$ 时：
+生成均匀随机数 $u_{\text{eig}} \sim \mathcal{U}(0, 1)$，依据特征交叉概率 $p_{\text{eigen}}^{(g)}$ 动态选择交叉坐标系：
 
-$$p_{\text{strat1}}^{(t+1)} = \text{clip}\left((1 - \alpha) p_{\text{strat1}}^{(t)} + \alpha \cdot \frac{n_{\text{strat1}}^{(t)}}{n_{\text{strat1}}^{(t)} + n_{\text{strat2}}^{(t)}}, \; 0.10, \; 0.90\right)$$
+* **模式 A：特征子空间正交旋转交叉（当 $u_{\text{eig}} < p_{\text{eigen}}^{(g)}$ 时）**
+1. *正向正交投影（Projection to Eigenspace）*：将父代 $\mathbf{x}_i^{(g)}$ 与变异向量 $\mathbf{v}_i^{(g)}$ 投影至解耦特征子空间：
 
+$$\hat{\mathbf{x}}_i^{(g)} = \left(\mathbf{B}^{(g)}\right)^T \mathbf{x}_i^{(g)}, \qquad \hat{\mathbf{v}}_i^{(g)} = \left(\mathbf{B}^{(g)}\right)^T \mathbf{v}_i^{(g)}$$
 
-$$p_{\text{eigen}}^{(t+1)} = \text{clip}\left((1 - \alpha) p_{\text{eigen}}^{(t)} + \alpha \cdot \frac{n_{\text{eig}}^{(t)}}{n_{\text{eig}}^{(t)} + n_{\text{std}}^{(t)}}, \; 0.05, \; 0.95\right)$$
 
+2. *特征主轴内二项式交叉（Eigenspace Binomial Crossover）*：生成随机掩码对角矩阵 $\mathbf{D}_{\text{mask}} = \text{diag}(m_1, \dots, m_D)$，其中 $m_j = \mathbb{I}(\text{rand}_{i,j} < CR_i \lor j = j_{\text{rand}})$，$j_{\text{rand}} \sim \mathcal{U}\{1, \dots, D\}$：
 
+$$\hat{\mathbf{u}}_i^{(g)} = \hat{\mathbf{x}}_i^{(g)} + \mathbf{D}_{\text{mask}} \left(\hat{\mathbf{v}}_i^{(g)} - \hat{\mathbf{x}}_i^{(g)}\right)$$
 
-其中阻尼平滑率 $\alpha = 0.15$，双向截断阈值 $[0.10, 0.90]$ 与 $[0.05, 0.95]$ 保证探索通道永不归零。
-* **适应度改进加权 Lehmer 记忆池更新**：
-令成功参数集合为 $\mathcal{S}_{CR}, \mathcal{S}_F$，各成功个体的归一化贡献权重为 $w_k = \frac{\Delta f_k^{(t)}}{\sum_{m=1}^{\vert{}\mathcal{S}\vert{}} \Delta f_m^{(t)}}$。采用加权算术均值更新交叉率记忆槽 $M_{CR, k_{\text{mem}}}$，采用加权二阶 Lehmer 均值更新缩放因子记忆槽 $M_{F, k_{\text{mem}}}$：
 
-$$M_{CR, k_{\text{mem}}}^{(t+1)} = \sum_{k=1}^{\vert{}\mathcal{S}_{CR}\vert{}} w_k \cdot S_{CR, k}, \qquad M_{F, k_{\text{mem}}}^{(t+1)} = \frac{\sum_{k=1}^{\vert{}\mathcal{S}_F\vert{}} w_k \cdot S_{F, k}^2}{\sum_{k=1}^{\vert{}\mathcal{S}_F\vert{}} w_k \cdot S_{F, k}}$$
+3. *逆向正交还原（Inverse Projection to Decision Space）*：
 
+$$\mathbf{u}_i^{(g)} = \mathbf{B}^{(g)} \hat{\mathbf{u}}_i^{(g)} = \mathbf{x}_i^{(g)} + \underbrace{\mathbf{B}^{(g)} \mathbf{D}_{\text{mask}} \left(\mathbf{B}^{(g)}\right)^T}_{\mathbf{P}_{\text{eigen}}} \left(\mathbf{v}_i^{(g)} - \mathbf{x}_i^{(g)}\right)$$
 
 
-随后循环移动记忆指针 $k_{\text{mem}} \leftarrow (k_{\text{mem}} + 1) \bmod H$。
 
-**2. 数学原理与几何意义**
 
-* **一阶低通滤波抗抖动**：单代成功率具有较强的伯努利采样方差，指数移动平均（IIR 低通滤波器，时间常数 $\tau \approx 1/\alpha \approx 6.7$ 代）滤除了单代随机波动，使 $p_{\text{eigen}}^{(t)}$ 在可分多峰地形上平稳收敛至下界 $0.05$，而在旋转复合地形上快速攀升至上界 $0.95$。
-* **Lehmer 二阶矩抗早熟偏置**：算术均值与二阶 Lehmer 均值满足柯西-施瓦茨不等式 $\text{Mean}_{WL}(\mathcal{S}_F) \ge \text{Mean}_{WA}(\mathcal{S}_F)$。在演化中后期，沿着当前梯度微调的小步长 $F_k$ 虽然容易取得微小成功，但大步长 $F_k$ 才能带来大的适应度跃升 $\Delta f_k$。加权 Lehmer 均值通过平方比值结构放大了较大成功步长 $S_{F,k}$ 的权重，防止缩放因子 $M_F$ 过早衰减至 0。
+* **模式 B：标准笛卡尔二项式交叉（当 $u_{\text{eig}} \ge p_{\text{eigen}}^{(g)}$ 时）**
 
-### 三、 IEEE 伪代码
+$$\mathbf{u}_i^{(g)} = \mathbf{x}_i^{(g)} + \mathbf{D}_{\text{mask}} \left(\mathbf{v}_i^{(g)} - \mathbf{x}_i^{(g)}\right)$$
 
-> **Algorithm 1:** Eigen-Adaptive Dual-Strategy Differential Evolution (EADS)
-> **Input:** Objective function $f(\mathbf{x})$, dimension $D$, bounds $[\mathbf{lb}, \mathbf{ub}]$, population size $N$, maximum epochs $T_{\max}$, memory size $H = 5$, archive rate $r_{\text{arc}} = 1.0$, eigen-update interval $G_e = 5$.
-> **Output:** Global best solution $\mathbf{x}_{\text{best}}$ and minimum fitness $f(\mathbf{x}_{\text{best}})$.
-> 1: **Initialize** population $\mathcal{P}^{(0)} = \{\mathbf{x}_1^{(0)}, \dots, \mathbf{x}_N^{(0)}\}$ uniformly in $[\mathbf{lb}, \mathbf{ub}]$ and evaluate $f(\mathbf{x}_i^{(0)})$.
-> 2: **Initialize** memory $\mathbf{M}_{CR} \leftarrow [0.5]^H$, $\mathbf{M}_F \leftarrow [0.5]^H$, pointer $k_{\text{mem}} \leftarrow 1$, archive $\mathcal{A} \leftarrow \emptyset$.
-> 3: **Initialize** adaptive probabilities $p_{\text{strat1}} \leftarrow 0.5$, $p_{\text{eigen}} \leftarrow 0.5$, orthogonal basis $\mathbf{B} \leftarrow \mathbf{I}_D$.
-> 4: **Sort** $\mathcal{P}^{(0)}$ in ascending order of objective fitness.
-> 5: **for** $t = 1$ **to** $T_{\max}$ **do**
-> 6: $\quad$ **if** $t \bmod G_e == 0$ **then** $\quad$ *// Operator 1: Log-Rank Weighted Eigenspace Extraction*
-> 7: $\quad\quad$ Set elite sample size $K \leftarrow \max(D + 1, \lfloor 0.35 N \rfloor)$ and extract top-$K$ individuals $\{\mathbf{x}_{(1:N)}, \dots, \mathbf{x}_{(K:N)}\}$.
-> 8: $\quad\quad$ Compute log-rank weights $w_k \leftarrow \frac{\ln(K+0.5)-\ln(k)}{\sum_{j=1}^K (\ln(K+0.5)-\ln(j))}$ for $k = 1, \dots, K$.
-> 9: $\quad\quad$ Compute weighted mean $\boldsymbol{\mu}_w \leftarrow \sum_{k=1}^K w_k \mathbf{x}_{(k:N)}$ and covariance $\mathbf{C}_w \leftarrow \sum_{k=1}^K w_k (\mathbf{x}_{(k:N)} - \boldsymbol{\mu}_w)(\mathbf{x}_{(k:N)} - \boldsymbol{\mu}_w)^T$.
-> 10: $\quad\quad$ Apply shrinkage regularization: $\mathbf{C}_{\text{reg}} \leftarrow 0.9999 \mathbf{C}_w + 0.0001 \left(\frac{\text{Tr}(\mathbf{C}_w)}{D}\right) \mathbf{I}_D$.
-> 11: $\quad\quad$ Perform eigendecomposition $\mathbf{C}_{\text{reg}} = \mathbf{B} \mathbf{\Lambda} \mathbf{B}^T$ to update orthogonal basis $\mathbf{B}$.
-> 12: $\quad$ **end if**
-> 13: $\quad$ Initialize $\mathcal{S}_{CR} \leftarrow \emptyset, \mathcal{S}_F \leftarrow \emptyset, \Delta \mathcal{F} \leftarrow \emptyset$, and counters $n_{\text{strat1}}, n_{\text{strat2}}, n_{\text{eig}}, n_{\text{std}} \leftarrow 0$.
-> 14: $\quad$ Update elite pool ratio $p^{(t)} \leftarrow 0.20 - (0.20 - 0.04) \cdot (t / T_{\max})$ and pool size $K_p^{(t)} \leftarrow \max(2, \lfloor N \cdot p^{(t)} \rfloor)$.
-> 15: $\quad$ **for** $i = 1$ **to** $N$ **do**
-> 16: $\quad\quad$ Sample memory index $r \sim \mathcal{U}\{1, \dots, H\}$.
-> 17: $\quad\quad$ Generate $CR_i \leftarrow \text{clip}(\mathcal{N}(M_{CR, r}, 0.1^2), 0, 1)$ and $F_i \sim \mathcal{C}(M_{F, r}, 0.1)$ truncated to $(0, 1]$.
-> 18: $\quad\quad$ Select $\mathbf{x}_{p\text{best}}$ randomly from top $K_p^{(t)}$ elites, and select distinct $\mathbf{x}_{r_1} \in \mathcal{P}^{(t)} \setminus \{\mathbf{x}_i\}$.
-> 19: $\quad\quad$ **if** $\text{rand}(0, 1) < p_{\text{strat1}}$ **then** $\quad$ *// Operator 2: Heterogeneous Dual-Strategy Mutation*
-> 20: $\quad\quad\quad$ Select $\tilde{\mathbf{x}}_{r_2} \in (\mathcal{P}^{(t)} \cup \mathcal{A}) \setminus \{\mathbf{x}_i, \mathbf{x}_{r_1}\}$ and compute $\mathbf{v}_i \leftarrow \mathbf{x}_i + F_i(\mathbf{x}_{p\text{best}} - \mathbf{x}_i) + F_i(\mathbf{x}_{r_1} - \tilde{\mathbf{x}}_{r_2})$.
-> 21: $\quad\quad$ **else**
-> 22: $\quad\quad\quad$ Select $\mathbf{x}_{r_2} \in \mathcal{P}^{(t)} \setminus \{\mathbf{x}_i\}$, draw $\boldsymbol{\delta}_i \sim \mathcal{C}(0, 0.05)^D$, and compute $\mathbf{v}_i \leftarrow \mathbf{x}_{p\text{best}} + F_i(\mathbf{x}_{r_1} - \mathbf{x}_{r_2}) + \boldsymbol{\delta}_i \odot (\mathbf{x}_{r_1} - \mathbf{x}_i)$.
-> 23: $\quad\quad$ **end if**
-> 24: $\quad\quad$ Enforce boundary constraints on $\mathbf{v}_i$ and draw forced index $j_{\text{rand}} \sim \mathcal{U}\{1, \dots, D\}$.
-> 25: $\quad\quad$ **if** $\text{rand}(0, 1) < p_{\text{eigen}}$ **then** $\quad$ *// Operator 3: Landscape-Aware Eigen-Subspace Crossover*
-> 26: $\quad\quad\quad$ Project $\hat{\mathbf{v}}_i \leftarrow \mathbf{B}^T \mathbf{v}_i$, $\hat{\mathbf{x}}_i \leftarrow \mathbf{B}^T \mathbf{x}_i$, perform binomial crossover on $\hat{\mathbf{v}}_i, \hat{\mathbf{x}}_i$ with $CR_i, j_{\text{rand}}$ to obtain $\hat{\mathbf{u}}_i$, and reconstruct $\mathbf{u}_i \leftarrow \mathbf{B}\hat{\mathbf{u}}_i$.
-> 27: $\quad\quad$ **else**
-> 28: $\quad\quad\quad$ Perform standard Cartesian binomial crossover on $\mathbf{v}_i, \mathbf{x}_i$ with $CR_i, j_{\text{rand}}$ to obtain $\mathbf{u}_i$.
-> 29: $\quad\quad$ **end if**
-> 30: $\quad\quad$ Enforce boundary constraints on $\mathbf{u}_i$ and evaluate $f(\mathbf{u}_i)$.
-> 31: $\quad\quad$ **if** $f(\mathbf{u}_i) < f(\mathbf{x}_i)$ **then** $\quad$ *// Greedy Selection & Archive Update*
-> 32: $\quad\quad\quad$ Append $CR_i \to \mathcal{S}_{CR}$, $F_i \to \mathcal{S}_F$, $(f(\mathbf{x}_i) - f(\mathbf{u}_i)) \to \Delta \mathcal{F}$, and increment corresponding win counters $(n_{\text{strat1}}\text{ or }n_{\text{strat2}})$ and $(n_{\text{eig}}\text{ or }n_{\text{std}})$.
-> 33: $\quad\quad\quad$ Insert $\mathbf{x}_i$ into archive $\mathcal{A}$ (replacing a random member if $\vert{}\mathcal{A}\vert{} \ge \lfloor r_{\text{arc}} N \rfloor$), and update $\mathbf{x}_i \leftarrow \mathbf{u}_i$.
-> 34: $\quad\quad$ **end if**
-> 35: $\quad$ **end for**
-> 36: $\quad$ Update $p_{\text{strat1}} \leftarrow \text{clip}\left(0.85 p_{\text{strat1}} + 0.15 \frac{n_{\text{strat1}}}{n_{\text{strat1}} + n_{\text{strat2}}}, 0.10, 0.90\right)$ and $p_{\text{eigen}} \leftarrow \text{clip}\left(0.85 p_{\text{eigen}} + 0.15 \frac{n_{\text{eig}}}{n_{\text{eig}} + n_{\text{std}}}, 0.05, 0.95\right)$. $\quad$ *// Operator 4*
-> 37: $\quad$ **if** $\mathcal{S}_{CR} \neq \emptyset$ and $\sum \Delta \mathcal{F} > 10^{-12}$ **then**
-> 38: $\quad\quad$ Update $M_{CR, k_{\text{mem}}} \leftarrow \text{Mean}_{WA}(\mathcal{S}_{CR}, \Delta \mathcal{F})$, $M_{F, k_{\text{mem}}} \leftarrow \text{Mean}_{WL}(\mathcal{S}_F, \Delta \mathcal{F})$, and $k_{\text{mem}} \leftarrow (k_{\text{mem}} \bmod H) + 1$.
-> 39: $\quad$ **end if**
-> 40: $\quad$ **Sort** $\mathcal{P}^{(t)}$ in ascending order of objective fitness.
-> 41: **end for**
-> 42: **return** $\mathbf{x}_{\text{best}} = \mathbf{x}_{(1:N)}^{(T_{\max})}$ and $f(\mathbf{x}_{\text{best}})$.
-
-
-### 四、 源代码
-```python
-import numpy as np
-import scipy.stats as stats
-import matplotlib.pyplot as plt
-
-import mealpy
-from mealpy import Optimizer, FloatVar
-from mealpy.swarm_based import PSO
-from mealpy.evolutionary_based import DE, SHADE
-
-class EADS(Optimizer):
-    def __init__(self, epoch=300, pop_size=50, H=5, arc_rate=1.0, p_best_rate=0.11, **kwargs):
-        super().__init__(**kwargs)
-        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
-        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
-        self.H = H
-        self.arc_rate = arc_rate
-        self.p_best_rate = p_best_rate
-        self.sort_flag = True  
-
-    def initialize_variables(self):
-        self.dim = self.problem.n_dims
-        self.M_CR = np.full(self.H, 0.5)
-        self.M_F = np.full(self.H, 0.5)
-        self.k_mem = 0
-        self.archive = []
-        self.max_archive_size = int(self.pop_size * self.arc_rate)
-        self.p_strat1 = 0.5
-        self.p_eigen = 0.5
-        self.B_matrix = np.eye(self.dim)
-
-    def _update_eigen_basis(self):
-        n_elites = max(self.dim + 1, int(0.35 * self.pop_size))
-        elites = np.array([agent.solution for agent in self.pop[:n_elites]])
-        
-        # ---------------- [改进 2-A: 对数秩加权协方差矩阵] ----------------
-        weights = np.log(n_elites + 0.5) - np.log(np.arange(1, n_elites + 1))
-        weights = weights / np.sum(weights)
-        mean_elite = np.sum(elites * weights[:, np.newaxis], axis=0)
-        diff = elites - mean_elite
-        cov = np.dot((diff * weights[:, np.newaxis]).T, diff)
-        # ------------------------------------------------------------------
-        
-        trace_m = np.trace(cov) / self.dim if self.dim > 0 else 1.0
-        cov_reg = 0.9999 * cov + 0.0001 * trace_m * np.eye(self.dim)
-        try:
-            _, eigen_vectors = np.linalg.eigh(cov_reg)
-            self.B_matrix = eigen_vectors
-        except np.linalg.LinAlgError:
-            self.B_matrix = np.eye(self.dim)
-
-    def evolve(self, epoch):
-        if epoch % 5 == 0:
-            self._update_eigen_basis()
-            
-        S_CR, S_F, delta_f = [], [], []
-        strat1_wins, strat2_wins = 0, 0
-        eigen_wins, standard_wins = 0, 0
-        
-        # ---------------- [改进 2-B: 动态 p-best 精英池线性缩减] ----------------
-        p_rate = 0.20 - (0.20 - 0.04) * (epoch / self.epoch)
-        p_count = max(2, int(self.pop_size * p_rate))
-        # ------------------------------------------------------------------------
-        
-        for i in range(self.pop_size):
-            r = self.generator.integers(0, self.H)
-            cr = float(np.clip(self.generator.normal(self.M_CR[r], 0.1), 0.0, 1.0))
-            while True:
-                f_val = float(self.generator.standard_cauchy() * 0.1 + self.M_F[r])
-                if f_val > 0:
-                    f_val = min(1.0, f_val)
-                    break
-                    
-            pbest_idx = self.generator.integers(0, p_count)
-            x_pbest = self.pop[pbest_idx].solution
-            cands_r1 = [idx for idx in range(self.pop_size) if idx != i]
-            r1 = self.generator.choice(cands_r1)
-            x_r1 = self.pop[r1].solution
-            
-            use_strat1 = (self.generator.uniform() < self.p_strat1)
-            if use_strat1:
-                # 策略 1 (开采): current-to-pbest/1 with archive
-                pool = list(range(self.pop_size))
-                if len(self.archive) > 0:
-                    pool += [self.pop_size + idx for idx in range(len(self.archive))]
-                cands_r2 = [idx for idx in pool if idx != i and idx != r1]
-                r2 = self.generator.choice(cands_r2)
-                x_r2 = self.pop[r2].solution if r2 < self.pop_size else self.archive[r2 - self.pop_size]
-                v = self.pop[i].solution + f_val * (x_pbest - self.pop[i].solution) + f_val * (x_r1 - x_r2)
-            else:
-                # 策略 2 (勘探): 精英基向量 + 柯西重尾扰动
-                r2 = self.generator.choice(cands_r1)
-                x_r2 = self.pop[r2].solution
-                cauchy_step = self.generator.standard_cauchy(self.dim) * 0.05
-                v = x_pbest + f_val * (x_r1 - x_r2) + cauchy_step * (x_r1 - self.pop[i].solution)
-                
-            v = self.correct_solution(v)
-            
-            # 自适应特征子空间交叉
-            use_eigen = (self.generator.uniform() < self.p_eigen)
-            if use_eigen:
-                v_prime = np.dot(self.B_matrix.T, v)
-                x_prime = np.dot(self.B_matrix.T, self.pop[i].solution)
-                mask = self.generator.uniform(size=self.dim) < cr
-                mask[self.generator.integers(0, self.dim)] = True
-                u_prime = np.where(mask, v_prime, x_prime)
-                u = np.dot(self.B_matrix, u_prime)
-            else:
-                mask = self.generator.uniform(size=self.dim) < cr
-                mask[self.generator.integers(0, self.dim)] = True
-                u = np.where(mask, v, self.pop[i].solution)
-                
-            u = self.correct_solution(u)
-            new_agent = self.generate_agent(u)
-            
-            if self.compare_target(new_agent.target, self.pop[i].target, self.problem.minmax):
-                diff = abs(self.pop[i].target.fitness - new_agent.target.fitness)
-                delta_f.append(diff)
-                S_CR.append(cr)
-                S_F.append(f_val)
-                if use_strat1: strat1_wins += 1
-                else: strat2_wins += 1
-                if use_eigen: eigen_wins += 1
-                else: standard_wins += 1
-                
-                if self.max_archive_size > 0:
-                    if len(self.archive) < self.max_archive_size:
-                        self.archive.append(self.pop[i].solution.copy())
-                    else:
-                        rep_idx = self.generator.integers(0, self.max_archive_size)
-                        self.archive[rep_idx] = self.pop[i].solution.copy()
-                self.pop[i] = new_agent
-                
-        # 概率自适应滑动更新
-        if (strat1_wins + strat2_wins) > 0:
-            self.p_strat1 = 0.85 * self.p_strat1 + 0.15 * (strat1_wins / (strat1_wins + strat2_wins))
-            self.p_strat1 = np.clip(self.p_strat1, 0.1, 0.9)
-            
-        if (eigen_wins + standard_wins) > 0:
-            self.p_eigen = 0.85 * self.p_eigen + 0.15 * (eigen_wins / (eigen_wins + standard_wins))
-            self.p_eigen = np.clip(self.p_eigen, 0.05, 0.95)
-            
-        # Lehmer 均值更新记忆池
-        if len(S_CR) > 0:
-            sum_df = np.sum(delta_f)
-            if sum_df > 1e-12:
-                w = np.array(delta_f) / sum_df
-                self.M_CR[self.k_mem] = np.sum(w * np.array(S_CR))
-                self.M_F[self.k_mem] = np.sum(w * (np.array(S_F)**2)) / np.sum(w * np.array(S_F))
-                self.k_mem = (self.k_mem + 1) % self.H
-
-# ==============================================================================
-# test
-# ==============================================================================
-dim = 10
-epoch = 600
-pop_size = 50  # D=10, 50, D=30, 100, D=60, 200
-n_runs = 3
-np.random.seed(42)
-
-o1 = np.random.uniform(-30, 30, dim)
-o2 = np.random.uniform(-5, 5, dim)
-o3 = np.random.uniform(-2.5, 2.5, dim)
-o4 = np.random.uniform(-10, 10, dim)
-o5 = np.random.uniform(-2.5, 2.5, dim)
-o6 = np.random.uniform(-10, 10, dim)
-o7 = np.random.uniform(-150, 150, dim)
-o8 = np.random.uniform(-2, 2, dim)
-
-H1 = np.random.randn(dim, dim); Q1, _ = np.linalg.qr(H1)
-H2 = np.random.randn(dim, dim); Q2, _ = np.linalg.qr(H2)
-H3 = np.random.randn(dim, dim); Q3, _ = np.linalg.qr(H3)
-
-def f1_shifted_sphere(x):
-    z = x - o1
-    return float(np.sum(z**2))
-
-def f2_shifted_rosenbrock(x):
-    z = x - o2 + 1.0
-    return float(np.sum(100.0 * (z[1:] - z[:-1]**2.0)**2.0 + (1 - z[:-1])**2.0))
-
-def f3_shifted_rastrigin(x):
-    z = x - o3
-    return float(10.0 * dim + np.sum(z**2.0 - 10.0 * np.cos(2.0 * np.pi * z)))
-
-def f4_shifted_ackley(x):
-    z = x - o4
-    d = len(z)
-    return float(-20.0 * np.exp(-0.2 * np.sqrt(np.sum(z**2) / d)) - np.exp(np.sum(np.cos(2.0 * np.pi * z)) / d) + 20.0 + np.e)
-
-def f5_shifted_rot_rastrigin(x):
-    z = np.dot(x - o5, Q1)
-    return float(10.0 * dim + np.sum(z**2.0 - 10.0 * np.cos(2.0 * np.pi * z)))
-
-def f6_shifted_rot_ackley(x):
-    z = np.dot(x - o6, Q2)
-    d = len(z)
-    return float(-20.0 * np.exp(-0.2 * np.sqrt(np.sum(z**2) / d)) - np.exp(np.sum(np.cos(2.0 * np.pi * z)) / d) + 20.0 + np.e)
-
-def f7_shifted_griewank(x):
-    z = x - o7
-    sum_part = np.sum(z**2) / 4000.0
-    prod_part = np.prod(np.cos(z / np.sqrt(np.arange(1, dim + 1))))
-    return float(sum_part - prod_part + 1.0)
-
-def f8_shifted_rot_hybrid(x):
-    z = np.dot(x - o8, Q3) + 1.0
-    rosen = 100.0 * (z[1:] - z[:-1]**2.0)**2.0 + (1 - z[:-1])**2.0
-    return float(np.sum(rosen**2 / 4000.0 - np.cos(rosen) + 1.0))
-
-BENCHMARKS = [
-    {"name": "F1: Shifted Sphere", "func": f1_shifted_sphere, "lb": -100.0, "ub": 100.0},
-    {"name": "F2: Shifted Rosenbrock", "func": f2_shifted_rosenbrock, "lb": -30.0, "ub": 30.0},
-    {"name": "F3: Shifted Rastrigin", "func": f3_shifted_rastrigin, "lb": -5.12, "ub": 5.12},
-    {"name": "F4: Shifted Ackley", "func": f4_shifted_ackley, "lb": -32.768, "ub": 32.768},
-    {"name": "F5: Shifted Rot Rastrigin", "func": f5_shifted_rot_rastrigin, "lb": -5.12, "ub": 5.12},
-    {"name": "F6: Shifted Rot Ackley", "func": f6_shifted_rot_ackley, "lb": -32.768, "ub": 32.768},
-    {"name": "F7: Shifted Griewank", "func": f7_shifted_griewank, "lb": -600.0, "ub": 600.0},
-    {"name": "F8: Shifted Rot Hybrid", "func": f8_shifted_rot_hybrid, "lb": -10.0, "ub": 10.0},
-]
-
-
-if __name__ == "__main__":
-    algorithms = {
-        "PSO (Mealpy)": lambda: PSO.OriginalPSO(epoch=epoch, pop_size=pop_size),
-        "DE (Mealpy)": lambda: DE.OriginalDE(epoch=epoch, pop_size=pop_size, wf=0.5, cr=0.9),
-        "SHADE (Mealpy)": lambda: SHADE.OriginalSHADE(epoch=epoch, pop_size=pop_size, miu_f=0.5, miu_cr=0.5),
-        "L-SHADE (Mealpy)": lambda: SHADE.OriginalL_SHADE(epoch=epoch, pop_size=pop_size, miu_f=0.5, miu_cr=0.5),
-        "EADS (Proposed)": lambda: EADS(epoch=epoch, pop_size=pop_size, H=5, arc_rate=1.0)
-    }
-
-    results_summary = {}
-    all_curves = {}
-
-    print("\n" + "="*110)
-    print(f"  8 test functions, D = {dim}, run times = {n_runs}, Epoch = {epoch})")
-    print("="*110)
-
-    for bm in BENCHMARKS:
-        fname = bm["name"]
-        print(f"\n>>> running: {fname}")
-        results_summary[fname] = {}
-        all_curves[fname] = {}
-        
-        prob_dict = {
-            "obj_func": bm["func"],
-            "bounds": FloatVar(lb=[bm["lb"]]*dim, ub=[bm["ub"]]*dim, name="delta"),
-            "minmax": "min",
-            "log_to": None,
-        }
-
-        for alg_name, model_builder in algorithms.items():
-            run_fits = []
-            run_curves = []
-            for r in range(n_runs):
-                model = model_builder()
-                g_best = model.solve(prob_dict, seed=r*100+7)
-                run_fits.append(g_best.target.fitness)
-                run_curves.append(model.history.list_global_best_fit)
-                
-            run_fits = np.array(run_fits)
-            mean_curve = np.mean(np.array(run_curves), axis=0)
-            results_summary[fname][alg_name] = {"mean": np.mean(run_fits), "std": np.std(run_fits)}
-            all_curves[fname][alg_name] = mean_curve
-            print(f"  [{alg_name:18s}] 适应度均值: {np.mean(run_fits):.3e} | 标准差: {np.std(run_fits):.3e}")
-
-    print("\n" + "="*115)
-    print(f"{'function':<28} | {'PSO':<12} | {'DE':<12} | {'SHADE':<12} | {'L-SHADE':<12} | {'EADS':<12}")
-    print("="*115)
-    for bm in BENCHMARKS:
-        fn = bm['name']
-        p_str = f"{results_summary[fn]['PSO (Mealpy)']['mean']:.2e}"
-        d_str = f"{results_summary[fn]['DE (Mealpy)']['mean']:.2e}"
-        s_str = f"{results_summary[fn]['SHADE (Mealpy)']['mean']:.2e}"
-        ls_str = f"{results_summary[fn]['L-SHADE (Mealpy)']['mean']:.2e}"
-        e_str = f"{results_summary[fn]['EADS (Proposed)']['mean']:.2e}"
-        print(f"{fn:<28} | {p_str:<12} | {d_str:<12} | {s_str:<12} | {ls_str:<12} | {e_str:<12}")
-    print("="*115)
-
-    fig, axes = plt.subplots(2, 4, figsize=(22, 10))
-    axes = axes.flatten()
-
-    colors = {
-        "PSO (Mealpy)": "#7f7f7f", "DE (Mealpy)": "#1f77b4", 
-        "SHADE (Mealpy)": "#ff7f0e", "L-SHADE (Mealpy)": "#9467bd",
-        "EADS (Proposed)": "#d62728"
-    }
-    linestyles = {
-        "PSO (Mealpy)": ":", "DE (Mealpy)": "--", 
-        "SHADE (Mealpy)": "-.", "L-SHADE (Mealpy)": "--",
-        "EADS (Proposed)": "-"
-    }
-    x_epochs = np.arange(1, epoch + 1)
-
-    for idx, bm in enumerate(BENCHMARKS):
-        ax = axes[idx]
-        fname = bm["name"]
-        for alg_name in algorithms.keys():
-            curve = all_curves[fname][alg_name]
-            plot_curve = np.maximum(curve, 1e-16)
-            ax.plot(x_epochs, plot_curve, label=alg_name, color=colors[alg_name],
-                    linestyle=linestyles[alg_name], linewidth=2.2 if "EADS" in alg_name else 1.4)
-        ax.set_yscale('log')
-        ax.set_title(fname, fontsize=11, fontweight='bold')
-        ax.set_xlabel('Epoch (Iterations)', fontsize=9)
-        ax.set_ylabel('Best Fitness (Log Scale)', fontsize=9)
-        ax.grid(True, linestyle='--', alpha=0.5)
-        ax.legend(fontsize=8, loc='upper right')
-
-    plt.tight_layout()
-    output_filename = f"mealpy_shifted_rotated_8benchmarks_dim{dim}_imp2.png"
-    # plt.savefig(output_filename, dpi=300)
-    plt.show()
-```
+
+
+**正交投影与旋转不变性原理**：由于 $\mathbf{B}^{(g)}$ 是正交矩阵，$\mathbf{P}_{\text{eigen}} = \mathbf{B}^{(g)} \mathbf{D}_{\text{mask}} (\mathbf{B}^{(g)})^T$ 是一个沿特征向量子空间的正交投影算子（满足 $\mathbf{P}_{\text{eigen}}^2 = \mathbf{P}_{\text{eigen}}$ 且 $\mathbf{P}_{\text{eigen}}^T = \mathbf{P}_{\text{eigen}}$）。在不可分旋转函数 $f(\mathbf{M}(\mathbf{x}-\mathbf{o}))$ 上，它在主轴方向上独立重组坐标分量而不破坏山谷共轭方向；而在部分可分或含轴向阶梯特征的函数上，保留的笛卡尔交叉分支则提供跨轴方差交换。
+
+---
+
+#### 算子 4：拉普拉斯平滑单次成功率更新与加权 Lehmer 历史记忆算子（Laplace-Smoothed Per-Trial Success Rate & Weighted Lehmer Memory）
+
+1. **贪婪选择与外部归档更新**：
+若 $f(\mathbf{u}_i^{(g)}) < f(\mathbf{x}_i^{(g)})$，记录适应度改进量 $\Delta f_i = \vert{}f(\mathbf{x}_i^{(g)}) - f(\mathbf{u}_i^{(g)})\vert{}$，将成功参数 $CR_i, F_i$ 存入集合 $\mathcal{S}_{CR}, \mathcal{S}_F$，将被替换的父代 $\mathbf{x}_i^{(g)}$ 存入归档库 $\mathcal{A}^{(g)}$（若 $\vert{}\mathcal{A}^{(g)}\vert{} = N$ 则随机替换其中一个历史个体），并更新 $\mathbf{x}_i^{(g+1)} \leftarrow \mathbf{u}_i^{(g)}$。
+2. **消除马太效应的拉普拉斯平滑单次成功率更新（Jeffreys-Prior Smoothed Per-Trial Success Rate）**：
+设第 $g$ 代中策略 1 与策略 2 的实际调用次数分别为 $N_1, N_2$（满足 $N_1 + N_2 = N$），严格改进父代的成功次数分别为 $n_1, n_2$；同理设特征交叉与标准笛卡尔交叉的调用次数与成功次数分别为 $N_{\text{eig}}, N_{\text{std}}$ 与 $n_{\text{eig}}, n_{\text{std}}$。
+* **为什么不能用成功次数比 $\frac{n_1}{n_1+n_2}$？**
+假设两算子真实单次成功率为 $q_1, q_2$，则期望成功次数为 $\mathbb{E}[n_1] = N \cdot p_{\text{strat1}}^{(g)} \cdot q_1$。若按 $\frac{n_1}{n_1+n_2}$ 更新，即便 $q_1 = q_2$，期望比值依然等于旧概率 $p_{\text{strat1}}^{(g)}$（形成鞅过程漂移与马太效应），一旦某一策略早期占优被推至 $0.90$，另一策略因抽样次数 $N_2 \to 0.1N$ 而永远无法翻盘。
+* **基于 Jeffreys 先验 $\text{Beta}(0.5, 0.5)$ 的后验单次成功率估计**：
+当 $n_1 + n_2 > 0$ 时，计算拉普拉斯平滑单次成功率 $\hat{s}_1^{(g)}, \hat{s}_2^{(g)}$ 并以学习率 $\alpha = 0.15$ 平滑更新：
+
+$$\hat{s}_1^{(g)} = \frac{n_1 + 0.5}{N_1 + 1.0}, \qquad \hat{s}_2^{(g)} = \frac{n_2 + 0.5}{N_2 + 1.0}$$
+
+
+$$p_{\text{strat1}}^{(g+1)} = \text{clip}\left((1 - \alpha) p_{\text{strat1}}^{(g)} + \alpha \frac{\hat{s}_1^{(g)}}{\hat{s}_1^{(g)} + \hat{s}_2^{(g)}}, \; 0.25, \; 0.90\right)$$
+
+
+
+当 $n_{\text{eig}} + n_{\text{std}} > 0$ 时，同理更新特征交叉概率 $p_{\text{eigen}}^{(g+1)}$：
+
+$$\hat{s}_{\text{eig}}^{(g)} = \frac{n_{\text{eig}} + 0.5}{N_{\text{eig}} + 1.0}, \qquad \hat{s}_{\text{std}}^{(g)} = \frac{n_{\text{std}} + 0.5}{N_{\text{std}} + 1.0}$$
+
+
+$$p_{\text{eigen}}^{(g+1)} = \text{clip}\left((1 - \alpha) p_{\text{eigen}}^{(g)} + \alpha \frac{\hat{s}_{\text{eig}}^{(g)}}{\hat{s}_{\text{eig}}^{(g)} + \hat{s}_{\text{std}}^{(g)}}, \; 0.05, \; 0.95\right)$$
+
+
+
+**数学性质**：分子加 $0.5$、分母加 $1.0$ 严格对应二项分布似然函数在无信息 Jeffreys 先验 $\text{Beta}(0.5, 0.5)$ 下的贝叶斯后验均值估计，既消除了样本量不对称偏差，又彻底杜绝了 $N_k = 0$ 时的除零异常。
+
+
+3. **适应度改进量加权的 Lehmer 历史记忆池更新（$H = 5$）**：
+当 $\vert{}\mathcal{S}_{CR}\vert{} > 0$ 且 $\sum_{k=1}^{\vert{}\mathcal{S}_{CR}\vert{}} \Delta f_k > 10^{-12}$ 时，定义归一化改进权重 $\omega_k = \frac{\Delta f_k}{\sum_{j} \Delta f_j}$，更新第 $k_{\text{mem}}$ 个记忆槽：
+
+$$M_{CR, k_{\text{mem}}}^{(g+1)} = \sum_{k=1}^{\vert{}\mathcal{S}_{CR}\vert{}} \omega_k S_{CR, k}, \qquad M_{F, k_{\text{mem}}}^{(g+1)} = \frac{\sum_{k=1}^{\vert{}\mathcal{S}_F\vert{}} \omega_k S_{F, k}^2}{\sum_{k=1}^{\vert{}\mathcal{S}_F\vert{}} \omega_k S_{F, k}}, \qquad k_{\text{mem}} \leftarrow (k_{\text{mem}} + 1) \bmod H$$
+
+
+
+---
+
+### 三、 算法时间与空间复杂度分析（Computational Complexity Analysis）
+
+在 SCI 论文的 **Section 3.6: Computational Complexity** 中，单代时间复杂度可分解为以下四项：
+
+1. **种群排序与精英筛选**：每代对 $N$ 个个体按适应度排序，复杂度为 $\mathcal{O}(N \log N)$；
+2. **对数秩收缩协方差与特征分解（每 $G_e = 5$ 代执行一次）**：计算 $K \times D$ 精英矩阵的加权协方差需 $\mathcal{O}(K D^2)$，实对称矩阵特征分解 `eigh` 需 $\mathcal{O}(D^3)$，分摊至每代的平均复杂度为 $\mathcal{O}\left(\frac{1}{G_e}(K D^2 + D^3)\right)$；
+3. **异构双策略变异与特征子空间正交投影**：每个个体若执行特征子空间交叉，包含两次矩阵-向量乘法 $\left(\mathbf{B}^{(g)}\right)^T \mathbf{v}$ 与 $\mathbf{B}^{(g)} \hat{\mathbf{u}}$，单次耗时 $\mathcal{O}(D^2)$，$N$ 个个体的总耗时为 $\mathcal{O}(p_{\text{eigen}} N D^2)$；
+4. **统计更新与记忆池维护**：耗时 $\mathcal{O}(N)$。
+
+因此，EADS 在 $G_{\max}$ 代进化过程中的**总时间复杂度**为：
+
+
+$$T_{\text{EADS}} = \mathcal{O}\left(G_{\max} \cdot \left(N \cdot T_{\text{eval}} + N \log N + N D^2 + \frac{1}{G_e} D^3\right)\right)$$
+
+
+其中 $T_{\text{eval}}$ 为单次目标函数评估耗时。在工程优化（如 CFD 气动仿真）或高维复杂函数评测中，$T_{\text{eval}} \gg D^2$，EADS 增加的线性代数运算开销几乎可以忽略不计，却能换取收敛精度的数量级跃升。**空间复杂度**方面，除存储规模为 $N \times D$ 的种群与归档库 $\mathcal{A}$ 外，仅需维护一个 $D \times D$ 的正交基矩阵 $\mathbf{B}^{(g)}$，总空间复杂度为 $\mathcal{O}(N D + D^2)$。
+
+---
