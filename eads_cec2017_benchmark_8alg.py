@@ -358,7 +358,7 @@ if __name__ == "__main__":
         ax.set_yscale("log")
         ax.set_title(fname, fontsize=10, fontweight="bold")
         ax.set_xlabel("Iterations (Epochs)", fontsize=8.5)
-        ax.set_ylabel("Error $\Delta f$ (Log Scale)", fontsize=8.5)
+        ax.set_ylabel(r"Error $\Delta f$ (Log Scale)", fontsize=8.5)
         ax.grid(True, linestyle="--", alpha=0.4)
         ax.legend(fontsize=6.8, loc="upper right", framealpha=0.85)
 
